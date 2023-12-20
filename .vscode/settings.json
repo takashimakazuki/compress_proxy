@@ -1,0 +1,33 @@
+{
+    "files.associations": {
+        "string.h": "c",
+        "zstd.h": "c",
+        "doca_comm_channel.h": "c",
+        "compress_server.h": "c",
+        "cstdlib": "c",
+        "doca_utils.h": "c",
+        "doca_log.h": "c",
+        "common.h": "c",
+        "pack.h": "c",
+        "doca_argp.h": "c",
+        "compress_mpi.h": "c",
+        "compress_client.h": "c",
+        "rte_lcore.h": "c",
+        "rte_eal.h": "c",
+        "rte_compat.h": "c",
+        "rte_per_lcore.h": "c",
+        "utils.h": "c",
+        "rte_memory.h": "c",
+        "rte_common.h": "c",
+        "doca_error.h": "c",
+        "queue.h": "c",
+        "ucp.h": "c",
+        "hello_world_util.h": "c",
+        "ucp_util.h": "c"
+    },
+    "C_Cpp.default.includePath": [
+        "/opt/mellanox/dpdk/include/dpdk",
+        "/opt/mellanox/doca/include",
+        "/opt/mellanox/dpdk/include/aarch64-linux-gnu/dpdk"
+    ]
+}
