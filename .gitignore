@@ -3,6 +3,10 @@
 *
 !*/
 !*.*
+!Makefile
+!VERSION
 
 *.o
 *.so
+
+build*

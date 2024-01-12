@@ -23,11 +23,24 @@
         "queue.h": "c",
         "ucp.h": "c",
         "hello_world_util.h": "c",
-        "ucp_util.h": "c"
+        "ucp_util.h": "c",
+        "unistd.h": "c",
+        "comm_channel.h": "c",
+        "cc_common.h": "c",
+        "errno.h": "c",
+        "doca_dev.h": "c",
+        "doca_pe.h": "c",
+        "doca_ctx.h": "c",
+        "doca_mmap.h": "c",
+        "doca_buf_inventory.h": "c",
+        "type_traits": "c"
     },
     "C_Cpp.default.includePath": [
-        "/opt/mellanox/dpdk/include/dpdk",
+        // "/opt/mellanox/dpdk/include/dpdk",
         "/opt/mellanox/doca/include",
-        "/opt/mellanox/dpdk/include/aarch64-linux-gnu/dpdk"
-    ]
+        // "/opt/mellanox/dpdk/include/aarch64-linux-gnu/dpdk",
+        "${workspaceFolder}/comp_proxy/include",
+        // "${workspaceFolder}/comm_channel_opt_arm/mellanox/dpdk/include"
+    ],
+    "C_Cpp.default.compileCommands": "/home/k-takashima/compress_mpi/comm_channel/builddir/compile_commands.json"
 }

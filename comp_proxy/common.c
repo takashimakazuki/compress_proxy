@@ -209,7 +209,7 @@ open_doca_device_with_capabilities(jobs_check func, struct doca_dev **retval)
 }
 
 doca_error_t
-open_doca_device_rep_with_vuid(struct doca_dev *local, enum doca_dev_rep_filter filter, const uint8_t *value,
+open_doca_device_rep_with_vuid(struct doca_dev *local, enum doca_devinfo_rep_filter filter, const uint8_t *value,
 				       size_t val_size, struct doca_dev_rep **retval)
 {
 	uint32_t nb_rdevs = 0;
@@ -251,7 +251,7 @@ open_doca_device_rep_with_vuid(struct doca_dev *local, enum doca_dev_rep_filter 
 }
 
 doca_error_t
-open_doca_device_rep_with_pci(struct doca_dev *local, enum doca_dev_rep_filter filter, struct doca_pci_bdf *pci_bdf,
+open_doca_device_rep_with_pci(struct doca_dev *local, enum doca_devinfo_rep_filter filter, struct doca_pci_bdf *pci_bdf,
 			      struct doca_dev_rep **retval)
 {
 	uint32_t nb_rdevs = 0;

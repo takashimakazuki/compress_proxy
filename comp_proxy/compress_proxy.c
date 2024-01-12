@@ -29,12 +29,12 @@
 #define TAG                    0xCAFE
 #define COMM_TYPE_DEFAULT      "STREAM"
 #define PRINT_INTERVAL         2000
-#define DEFAULT_NUM_ITERATIONS 10000
+#define DEFAULT_NUM_ITERATIONS 1
 #define TEST_AM_ID             0
 
 DOCA_LOG_REGISTER(COMPRESS_PROXY)
 
-static size_t test_string_length = 16;
+static size_t test_string_length = 200;
 static size_t iov_cnt            = 1;
 static uint16_t server_port    = DEFAULT_PORT;
 static sa_family_t ai_family   = AF_INET;
@@ -174,7 +174,7 @@ static void send_cb(void *request, ucs_status_t status, void *user_data)
  */
 static void err_cb(void *arg, ucp_ep_h ep, ucs_status_t status)
 {
-    DOCA_DLOG_ERR("error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
+    DOCA_LOG_ERR("error handling callback was invoked with status %d (%s)", status, ucs_status_string(status));
     connection_closed = 1;
 }
 
@@ -245,7 +245,7 @@ static ucs_status_t start_client(ucp_worker_h ucp_worker,
 
     status = ucp_ep_create(ucp_worker, &ep_params, client_ep);
     if (status != UCS_OK) {
-        DOCA_DLOG_ERR("failed to connect to %s (%s)", address_str, ucs_status_string(status));
+        DOCA_LOG_ERR("failed to connect to %s (%s)", address_str, ucs_status_string(status));
     }
 
     return status;
@@ -477,6 +477,7 @@ ucs_status_t ucp_am_data_cb(void *arg, const void *header, size_t header_length,
         fprintf(stderr, "received unexpected header, length %ld", header_length);
     }
 
+    /* am_data_desc is a global variable. */
     am_data_desc.complete = 1;
 
     if (param->recv_attr & UCP_AM_RECV_ATTR_FLAG_RNDV) {
@@ -556,8 +557,7 @@ static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
     } else {
         /* Client sends a message to the server using the AM API */
         params.cb.send = (ucp_send_nbx_callback_t)send_cb;
-        request        = ucp_am_send_nbx(ep, TEST_AM_ID, NULL, 0ul, msg,
-                                         msg_length, &params);
+        request        = ucp_am_send_nbx(ep, TEST_AM_ID, NULL, 0ul, msg, msg_length, &params);
     }
 
     return request_finalize(ucp_worker, request, &ctx, is_server, iov,
@@ -884,9 +884,10 @@ static int client_server_do_work(ucp_worker_h ucp_worker, ucp_ep_h ep, send_recv
     connection_closed = 0;
 
     for (i = 0; i < num_iterations; i++) {
+        // Send-Recv call
         ret = client_server_communication(ucp_worker, ep, send_recv_type, is_server, i);
         if (ret != 0) {
-            DOCA_DLOG_ERR("%s failed on iteration #%d", (is_server ? "server": "client"), i + 1);
+            DOCA_LOG_ERR("%s failed on iteration #%d", (is_server ? "server": "client"), i + 1);
             goto out;
         }
     }
@@ -900,10 +901,18 @@ static int client_server_do_work(ucp_worker_h ucp_worker, ucp_ep_h ep, send_recv
         }
     }
 
+    /* Server→Client */
+    DOCA_LOG_INFO("Server→Client");
+    ret = client_server_communication(ucp_worker, ep, send_recv_type, !is_server, 0);
+    if (ret != 0) {
+        DOCA_LOG_ERR("Server→Client failed on iteration #%d", 0x0);
+        goto out;
+    }
+
     /* FIN message in reverse direction to acknowledge delivery */
     ret = client_server_communication(ucp_worker, ep, send_recv_type, !is_server, i + 1);
     if (ret != 0) {
-        DOCA_DLOG_ERR("%s failed on FIN message", (is_server ? "server": "client"));
+        DOCA_LOG_ERR("%s failed on FIN message", (is_server ? "server": "client"));
         goto out;
     }
 
@@ -989,7 +998,7 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
         /* Reinitialize the server's context to be used for the next client */
         context.conn_request = NULL;
 
-        DOCA_DLOG_INFO("Waiting for connection...\n");
+        DOCA_LOG_INFO("Waiting for connection...\n");
     }
 
 err_ep:
@@ -1007,12 +1016,12 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
     ucp_ep_h     client_ep;
     ucs_status_t status;
     int          ret;
-    DOCA_DLOG_INFO("run_client start");
+    DOCA_LOG_INFO("run_client start");
 
 
     status = start_client(ucp_worker, server_addr, &client_ep);
     if (status != UCS_OK) {
-        DOCA_DLOG_ERR("failed to start client (%s)", ucs_status_string(status));
+        DOCA_LOG_ERR("failed to start client (%s)", ucs_status_string(status));
         ret = -1;
         goto out;
     }
@@ -1041,7 +1050,7 @@ static int init_context(ucp_context_h *ucp_context, ucp_worker_h *ucp_worker,
 
     /* UCP initialization */
     ucp_params.field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_NAME;
-    ucp_params.name       = "client_server";
+    ucp_params.name       = "compress_proxy";
 
     if (send_recv_type == CLIENT_SERVER_SEND_RECV_STREAM) {
         ucp_params.features = UCP_FEATURE_STREAM;
@@ -1079,18 +1088,20 @@ int main(int argc, char **argv)
     char *listen_addr = NULL;
 
     doca_error_t result;
-    struct doca_logger_backend *stdout_logger = NULL;
+	struct doca_log_backend *sdk_log;
 
     /* Create a logger backend that prints to the standard output */
-    result = doca_log_create_file_backend(stdout, &stdout_logger);
-    if (result != DOCA_SUCCESS)
-        return EXIT_FAILURE;
+	result = doca_log_backend_create_with_file_sdk(stdout, &sdk_log);
+	if (result != DOCA_SUCCESS) {
+		return EXIT_FAILURE;
+	}    
+    DOCA_LOG_INFO("COMM_CHANNEL started");
 
     /* UCP objects */
     ucp_context_h ucp_context;
     ucp_worker_h  ucp_worker;
 
-    DOCA_DLOG_INFO("UCX_CLIENT_SERVER_EXAMPLE pid = %d", getpid());
+    DOCA_LOG_INFO("UCX_CLIENT_SERVER_EXAMPLE pid = %d", getpid());
 
     result = (doca_error_t)parse_cmd(argc, argv, &server_addr, &listen_addr, &send_recv_type);
     if (result != 0) {

@@ -5,6 +5,7 @@
 
 #include "zstd.h" 
 
+/* CompressionのみをオフロードするMPIラッパライブラリ */
 
 int compression(char *dst, int dst_sz, const char *src, int src_sz)
 {

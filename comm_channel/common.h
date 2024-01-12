@@ -17,8 +17,8 @@
 #include <doca_error.h>
 #include <doca_dev.h>
 
-/* Function to check if a given device is capable of executing some job */
-typedef doca_error_t (*jobs_check)(struct doca_devinfo *);
+/* Function to check if a given device is capable of executing some task */
+typedef doca_error_t (*tasks_check)(struct doca_devinfo *);
 
 /* DOCA core objects used by the samples / applications */
 struct program_core_objects {
@@ -27,18 +27,18 @@ struct program_core_objects {
 	struct doca_mmap *dst_mmap;		/* doca mmap for destination buffer */
 	struct doca_buf_inventory *buf_inv;	/* doca buffer inventory */
 	struct doca_ctx *ctx;			/* doca context */
-	struct doca_workq *workq;		/* doca work queue */
+	struct doca_pe *pe;			/* doca progress engine */
 };
 
 /*
  * Open a DOCA device according to a given PCI address
  *
- * @value [in]: PCI address
- * @func [in]: pointer to a function that checks if the device have some job capabilities (Ignored if set to NULL)
+ * @pci_addr [in]: PCI address
+ * @func [in]: pointer to a function that checks if the device have some task capabilities (Ignored if set to NULL)
  * @retval [out]: pointer to doca_dev struct, NULL if not found
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
-doca_error_t open_doca_device_with_pci(const struct doca_pci_bdf *value, jobs_check func,
+doca_error_t open_doca_device_with_pci(const char *pci_addr, tasks_check func,
 					       struct doca_dev **retval);
 
 /*
@@ -46,11 +46,11 @@ doca_error_t open_doca_device_with_pci(const struct doca_pci_bdf *value, jobs_ch
  *
  * @value [in]: IB device name
  * @val_size [in]: input length, in bytes
- * @func [in]: pointer to a function that checks if the device have some job capabilities (Ignored if set to NULL)
+ * @func [in]: pointer to a function that checks if the device have some task capabilities (Ignored if set to NULL)
  * @retval [out]: pointer to doca_dev struct, NULL if not found
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
-doca_error_t open_doca_device_with_ibdev_name(const uint8_t *value, size_t val_size, jobs_check func,
+doca_error_t open_doca_device_with_ibdev_name(const uint8_t *value, size_t val_size, tasks_check func,
 						      struct doca_dev **retval);
 
 /*
@@ -58,21 +58,21 @@ doca_error_t open_doca_device_with_ibdev_name(const uint8_t *value, size_t val_s
  *
  * @value [in]: interface name
  * @val_size [in]: input length, in bytes
- * @func [in]: pointer to a function that checks if the device have some job capabilities (Ignored if set to NULL)
+ * @func [in]: pointer to a function that checks if the device have some task capabilities (Ignored if set to NULL)
  * @retval [out]: pointer to doca_dev struct, NULL if not found
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
-doca_error_t open_doca_device_with_iface_name(const uint8_t *value, size_t val_size, jobs_check func,
+doca_error_t open_doca_device_with_iface_name(const uint8_t *value, size_t val_size, tasks_check func,
 						struct doca_dev **retval);
 
 /*
  * Open a DOCA device with a custom set of capabilities
  *
- * @func [in]: pointer to a function that checks if the device have some job capabilities
+ * @func [in]: pointer to a function that checks if the device have some task capabilities
  * @retval [out]: pointer to doca_dev struct, NULL if not found
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
-doca_error_t open_doca_device_with_capabilities(jobs_check func, struct doca_dev **retval);
+doca_error_t open_doca_device_with_capabilities(tasks_check func, struct doca_dev **retval);
 
 /*
  * Open a DOCA device representor according to a given VUID string
@@ -84,7 +84,7 @@ doca_error_t open_doca_device_with_capabilities(jobs_check func, struct doca_dev
  * @retval [out]: pointer to doca_dev_rep struct, NULL if not found
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
-doca_error_t open_doca_device_rep_with_vuid(struct doca_dev *local, enum doca_dev_rep_filter filter,
+doca_error_t open_doca_device_rep_with_vuid(struct doca_dev *local, enum doca_devinfo_rep_filter filter,
 						    const uint8_t *value, size_t val_size,
 						    struct doca_dev_rep **retval);
 
@@ -93,23 +93,12 @@ doca_error_t open_doca_device_rep_with_vuid(struct doca_dev *local, enum doca_de
  *
  * @local [in]: queries representors of the given local doca device
  * @filter [in]: bitflags filter to narrow the representors in the search
- * @pci_bdf [in]: DOCA PCI BDF structure
+ * @pci_addr [in]: PCI address
  * @retval [out]: pointer to doca_dev_rep struct, NULL if not found
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
-doca_error_t open_doca_device_rep_with_pci(struct doca_dev *local, enum doca_dev_rep_filter filter,
-						   struct doca_pci_bdf *pci_bdf, struct doca_dev_rep **retval);
-
-/*
- * Create and start a series of DOCA Core objects needed for the program's execution.
- * See also @ref create_core_objects and @ref start_context.
- *
- * @state [in]: struct containing the set of initialized DOCA Core objects
- * @workq_depth [in]: depth for the created Work Queue
- * @max_bufs [in]: maximum number of buffers for DOCA Inventory
- * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
- */
-doca_error_t init_core_objects(struct program_core_objects *state, uint32_t workq_depth, uint32_t max_bufs);
+doca_error_t open_doca_device_rep_with_pci(struct doca_dev *local, enum doca_devinfo_rep_filter filter,
+						   const char *pci_addr, struct doca_dev_rep **retval);
 
 /*
  * Initialize a series of DOCA Core objects needed for the program's execution
@@ -121,16 +110,16 @@ doca_error_t init_core_objects(struct program_core_objects *state, uint32_t work
 doca_error_t create_core_objects(struct program_core_objects *state, uint32_t max_bufs);
 
 /*
- * Start context and work queue needed for the program's execution
+ * Request to stop context
  *
- * @state [in]: struct containing the set of initialized DOCA Core objects
- * @workq_depth [in]: depth for the created Work Queue
+ * @pe [in]: DOCA progress engine
+ * @ctx [in]: DOCA context added to the progress engine
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
-doca_error_t start_context(struct program_core_objects *state, uint32_t workq_depth);
+doca_error_t request_stop_ctx(struct doca_pe *pe, struct doca_ctx *ctx);
 
 /*
- * Cleanup the series of DOCA Core objects created by init_core_objects
+ * Cleanup the series of DOCA Core objects created by create_core_objects
  *
  * @state [in]: struct containing the set of initialized DOCA Core objects
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise

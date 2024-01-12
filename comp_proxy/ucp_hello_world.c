@@ -25,6 +25,7 @@
  * Notes:
  *
  *    - Client acquires Server UCX address via TCP socket
+ *    - Tag matching API is used for data transfer: ucp_tag_send_nbx(), ucp_tag_msg_recv_nbx()
  *
  *
  * Author:

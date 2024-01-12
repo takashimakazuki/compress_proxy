@@ -13,11 +13,15 @@ fi
 
 case $1 in
     "s")
-        sudo ./compress_proxy ${@:2}
+        make clean
+        make cc_server
+        ./cc_server
         ;;
 
     "c")
-        sudo ./compress_proxy -a 192.168.200.12 ${@:2}
+        make clean
+        make cc_client
+        ./cc_client
         ;;
 
     *)
