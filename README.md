@@ -18,7 +18,7 @@
 ```
 
 ```
-$ sudo mount -t nfs 192.168.100.1:/path/to/compress_mpi /home/ubuntu/compress_mpi -o hard,intr
+$ sudo mount -t nfs 192.168.100.1:/path/to/compress_proxy /home/ubuntu/compress_proxy -o hard,intr
 ```
 
 ## Run

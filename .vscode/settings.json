@@ -33,7 +33,8 @@
         "doca_ctx.h": "c",
         "doca_mmap.h": "c",
         "doca_buf_inventory.h": "c",
-        "type_traits": "c"
+        "type_traits": "c",
+        "getopt_core.h": "c"
     },
     "C_Cpp.default.includePath": [
         // "/opt/mellanox/dpdk/include/dpdk",
@@ -42,5 +43,6 @@
         "${workspaceFolder}/comp_proxy/include",
         // "${workspaceFolder}/comm_channel_opt_arm/mellanox/dpdk/include"
     ],
-    "C_Cpp.default.compileCommands": "/home/k-takashima/compress_mpi/comm_channel/builddir/compile_commands.json"
+    "C_Cpp.default.compileCommands": "/home/k-takashima/compress_proxy/comp_proxy/builddir/compile_commands.json",
+    "C_Cpp.errorSquiggles": "disabled"
 }

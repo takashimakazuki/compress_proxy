@@ -22,6 +22,7 @@
 #include <arpa/inet.h> /* inet_addr */
 #include <unistd.h>    /* getopt */
 #include <stdlib.h>    /* atoi */
+#include <bits/getopt_core.h>
 
 #define DEFAULT_PORT           13337
 #define IP_STRING_LEN          50
@@ -862,24 +863,10 @@ out:
     return status;
 }
 
-ucs_status_t register_am_recv_callback(ucp_worker_h worker)
-{
-    ucp_am_handler_param_t param;
-
-    param.field_mask = UCP_AM_HANDLER_PARAM_FIELD_ID |
-                       UCP_AM_HANDLER_PARAM_FIELD_CB |
-                       UCP_AM_HANDLER_PARAM_FIELD_ARG;
-    param.id         = TEST_AM_ID;
-    param.cb         = ucp_am_data_cb;
-    param.arg        = worker; /* not used in our callback */
-
-    return ucp_worker_set_am_recv_handler(worker, &param);
-}
 
 static int client_server_do_work(ucp_worker_h ucp_worker, ucp_ep_h ep, send_recv_type_t send_recv_type, int is_server)
 {
     int i, ret = 0;
-    ucs_status_t status;
 
     connection_closed = 0;
 
@@ -888,15 +875,6 @@ static int client_server_do_work(ucp_worker_h ucp_worker, ucp_ep_h ep, send_recv
         ret = client_server_communication(ucp_worker, ep, send_recv_type, is_server, i);
         if (ret != 0) {
             DOCA_LOG_ERR("%s failed on iteration #%d", (is_server ? "server": "client"), i + 1);
-            goto out;
-        }
-    }
-
-    /* Register recv callback on the client side to receive FIN message */
-    if (!is_server && (send_recv_type == CLIENT_SERVER_SEND_RECV_AM)) {
-        status = register_am_recv_callback(ucp_worker);
-        if (status != UCS_OK) {
-            ret = -1;
             goto out;
         }
     }
@@ -936,19 +914,13 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
     ucs_status_t     status;
     int              ret;
 
+    DOCA_LOG_INFO("run_server start");
+
     /* Create a data worker (to be used for data exchange between the server
      * and the client after the connection between them was established) */
     ret = init_worker(ucp_context, &ucp_data_worker);
     if (ret != 0) {
         goto err;
-    }
-
-    if (send_recv_type == CLIENT_SERVER_SEND_RECV_AM) {
-        status = register_am_recv_callback(ucp_data_worker);
-        if (status != UCS_OK) {
-            ret = -1;
-            goto err_worker;
-        }
     }
 
     /* Initialize the server's context. */
