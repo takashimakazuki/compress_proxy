@@ -1088,20 +1088,18 @@ int main(int argc, char **argv)
     char *listen_addr = NULL;
 
     doca_error_t result;
-	struct doca_log_backend *sdk_log;
 
     /* Create a logger backend that prints to the standard output */
-	result = doca_log_backend_create_with_file_sdk(stdout, &sdk_log);
+	result = doca_log_backend_create_standard();
 	if (result != DOCA_SUCCESS) {
 		return EXIT_FAILURE;
 	}    
-    DOCA_LOG_INFO("COMM_CHANNEL started");
 
     /* UCP objects */
     ucp_context_h ucp_context;
     ucp_worker_h  ucp_worker;
 
-    DOCA_LOG_INFO("UCX_CLIENT_SERVER_EXAMPLE pid = %d", getpid());
+    DOCA_LOG_INFO("COMPRESS_PROXY pid = %d", getpid());
 
     result = (doca_error_t)parse_cmd(argc, argv, &server_addr, &listen_addr, &send_recv_type);
     if (result != 0) {

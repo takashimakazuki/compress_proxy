@@ -199,14 +199,13 @@ main(int argc, char **argv)
 	struct cc_config cfg;
 	const char *server_name = "cc_sample_server";
 	doca_error_t result;
-	struct doca_log_backend *sdk_log;
 
 	strcpy(cfg.cc_dev_pci_addr, "0c:00.1");
 	strcpy(cfg.text, "MESSAGE_FROM_CLIENT_AAA");
 	/* Client, no need for the cc_dev_rep_pci_addr field */
 
 	/* Create a logger backend that prints to the standard output */
-	  result = doca_log_backend_create_with_file_sdk(stdout, &sdk_log);
+	result = doca_log_backend_create_standard();
 	if (result != DOCA_SUCCESS) {
 		return EXIT_FAILURE;
 	}

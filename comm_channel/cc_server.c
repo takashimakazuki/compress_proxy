@@ -180,11 +180,10 @@ int main(int argc, char **argv)
 {
     doca_error_t result;
     struct cc_config cfg;
-	struct doca_log_backend *sdk_log;
 	const char *server_name = "cc_sample_server";
 
 	/* Create a logger backend that prints to the standard output */
-	result = doca_log_backend_create_with_file_sdk(stdout, &sdk_log);
+	result = doca_log_backend_create_standard();
 	if (result != DOCA_SUCCESS) {
 		return EXIT_FAILURE;
 	}    
