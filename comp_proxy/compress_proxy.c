@@ -11,6 +11,7 @@
 
 #include "hello_world_util.h"
 #include "ucp_util.h"
+#include "compress_proxy.h"
 
 #include <ucp/api/ucp.h>
 
@@ -23,6 +24,9 @@
 #include <unistd.h>    /* getopt */
 #include <stdlib.h>    /* atoi */
 #include <bits/getopt_core.h>
+#include <signal.h>
+#include <stdbool.h>
+
 
 #define DEFAULT_PORT           13337
 #define IP_STRING_LEN          50
@@ -42,45 +46,16 @@ static sa_family_t ai_family   = AF_INET;
 static int num_iterations      = DEFAULT_NUM_ITERATIONS;
 static int connection_closed   = 1;
 
+static bool quit_app;		/* Shared variable to allow for a proper shutdown */
 
-typedef enum {
-    CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
-    CLIENT_SERVER_SEND_RECV_TAG     = UCS_BIT(1),
-    CLIENT_SERVER_SEND_RECV_AM      = UCS_BIT(2),
-    CLIENT_SERVER_SEND_RECV_DEFAULT = CLIENT_SERVER_SEND_RECV_STREAM
-} send_recv_type_t;
-
-
-/**
- * Server's application context to be used in the user's connection request
- * callback.
- * It holds the server's listener and the handle to an incoming connection request.
- */
-typedef struct ucx_server_ctx {
-    volatile ucp_conn_request_h conn_request;
-    ucp_listener_h              listener;
-} ucx_server_ctx_t;
-
-
-/**
- * Stream request context. Holds a value to indicate whether or not the
- * request is completed.
- */
-typedef struct test_req {
-    int complete;
-} test_req_t;
-
-
-/**
- * Descriptor of the data received with AM API.
- */
-static struct {
-    volatile int complete;
-    int          is_rndv;
-    void         *desc;
-    void         *recv_buf;
-} am_data_desc = {0, 0, NULL, NULL};
-
+static void
+signal_handler(int signum)
+{
+	if (signum == SIGINT || signum == SIGTERM || signum == SIGKILL) {
+		DOCA_LOG_INFO("Signal %d received, preparing to exit", signum);
+		quit_app = true;
+	}
+}
 
 void buffer_free(ucp_dt_iov_t *iov)
 {
@@ -269,14 +244,14 @@ static void print_iov(const ucp_dt_iov_t *iov)
  * side.
  */
 static
-void print_result(int is_server, const ucp_dt_iov_t *iov, int current_iter)
+void print_result(int is_server, const ucp_dt_iov_t *iov)
 {
     if (is_server) {
-        printf("Server: iteration #%d\n", (current_iter + 1));
+        printf("Server\n");
         printf("UCX data message was received\n");
         printf("\n\n----- UCP TEST SUCCESS -------\n\n");
     } else {
-        printf("Client: iteration #%d\n", (current_iter + 1));
+        printf("Client\n");
         printf("\n\n------------------------------\n\n");
     }
 
@@ -303,6 +278,7 @@ static ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request,
     }
 
     while (ctx->complete == 0) {
+        if (quit_app) break;
         ucp_worker_progress(ucp_worker);
     }
     status = ucp_request_check_status(request);
@@ -313,8 +289,7 @@ static ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request,
 }
 
 static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
-                            test_req_t *ctx, int is_server, ucp_dt_iov_t *iov,
-                            int current_iter)
+                            test_req_t *ctx, int is_server, ucp_dt_iov_t *iov)
 {
     int ret = 0;
     ucs_status_t status;
@@ -327,11 +302,7 @@ static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
         goto release_iov;
     }
 
-    /* Print the output of the first, last and every PRINT_INTERVAL iteration */
-    if ((current_iter == 0) || (current_iter == (num_iterations - 1)) ||
-        !((current_iter + 1) % (PRINT_INTERVAL))) {
-        print_result(is_server, iov, current_iter);
-    }
+    print_result(is_server, iov);
 
 release_iov:
     buffer_free(iov);
@@ -369,7 +340,7 @@ fill_request_param(ucp_dt_iov_t *iov, int is_client,
  * The client sends a message to the server and waits until the send it completed.
  * The server receives a message from the client and waits for its completion.
  */
-static int send_recv_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server, int current_iter)
+static int send_recv_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
 {
     ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     ucp_request_param_t param;
@@ -419,8 +390,7 @@ static int send_recv_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
         request              = ucp_stream_recv_nbx(ep, iov, iov_cnt, NULL, &param);
     }
 
-    return request_finalize(ucp_worker, request, &ctx, is_server, iov,
-                            current_iter);
+    return request_finalize(ucp_worker, request, &ctx, is_server, iov);
 }
 
 /**
@@ -428,8 +398,7 @@ static int send_recv_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
  * The client sends a message to the server and waits until the send it completed.
  * The server receives a message from the client and waits for its completion.
  */
-static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
-                         int current_iter)
+static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
 {
     ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     ucp_request_param_t param;
@@ -456,8 +425,7 @@ static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
                                          &param);
     }
 
-    return request_finalize(ucp_worker, request, &ctx, is_server, iov,
-                            current_iter);
+    return request_finalize(ucp_worker, request, &ctx, is_server, iov);
 }
 
 ucs_status_t ucp_am_data_cb(void *arg, const void *header, size_t header_length,
@@ -513,8 +481,7 @@ ucs_status_t ucp_am_data_cb(void *arg, const void *header, size_t header_length,
  * The server gets a message from the client and if it is rendezvous request,
  * initiates receive operation.
  */
-static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
-                        int current_iter)
+static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
 {
     ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     test_req_t *request;
@@ -561,8 +528,7 @@ static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server,
         request        = ucp_am_send_nbx(ep, TEST_AM_ID, NULL, 0ul, msg, msg_length, &params);
     }
 
-    return request_finalize(ucp_worker, request, &ctx, is_server, iov,
-                            current_iter);
+    return request_finalize(ucp_worker, request, &ctx, is_server, iov);
 }
 
 /**
@@ -699,24 +665,24 @@ static char* sockaddr_get_port_str(const struct sockaddr_storage *sock_addr,
     }
 }
 
-static int client_server_communication(ucp_worker_h worker, ucp_ep_h ep,
+static int client_server_send_recv(ucp_worker_h worker, ucp_ep_h ep,
                                        send_recv_type_t send_recv_type,
-                                       int is_server, int current_iter)
+                                       int is_server)
 {
     int ret;
 
     switch (send_recv_type) {
     case CLIENT_SERVER_SEND_RECV_STREAM:
         /* Client-Server communication via Stream API */
-        ret = send_recv_stream(worker, ep, is_server, current_iter);
+        ret = send_recv_stream(worker, ep, is_server);
         break;
     case CLIENT_SERVER_SEND_RECV_TAG:
         /* Client-Server communication via Tag-Matching API */
-        ret = send_recv_tag(worker, ep, is_server, current_iter);
+        ret = send_recv_tag(worker, ep, is_server);
         break;
     case CLIENT_SERVER_SEND_RECV_AM:
         /* Client-Server communication via AM API. */
-        ret = send_recv_am(worker, ep, is_server, current_iter);
+        ret = send_recv_am(worker, ep, is_server);
         break;
     default:
         fprintf(stderr, "unknown send-recv type %d\n", send_recv_type);
@@ -864,41 +830,18 @@ out:
 }
 
 
-static int client_server_do_work(ucp_worker_h ucp_worker, ucp_ep_h ep, send_recv_type_t send_recv_type, int is_server)
+static int client_server_do_work(
+    ucp_worker_h ucp_worker, ucp_ep_h ep,
+    send_recv_type_t send_recv_type, int is_receiver, 
+    void *buf, size_t buf_len)
 {
-    int i, ret = 0;
+    int ret = 0;
 
-    connection_closed = 0;
-
-    for (i = 0; i < num_iterations; i++) {
-        // Send-Recv call
-        ret = client_server_communication(ucp_worker, ep, send_recv_type, is_server, i);
-        if (ret != 0) {
-            DOCA_LOG_ERR("%s failed on iteration #%d", (is_server ? "server": "client"), i + 1);
-            goto out;
-        }
-    }
-
-    /* Server→Client */
-    DOCA_LOG_INFO("Server→Client");
-    ret = client_server_communication(ucp_worker, ep, send_recv_type, !is_server, 0);
+    DOCA_LOG_INFO("DATA C->S(%s)", cpxy_sendrecv_type_string(send_recv_type));
+    ret = client_server_send_recv(ucp_worker, ep, send_recv_type, is_receiver);
     if (ret != 0) {
-        DOCA_LOG_ERR("Server→Client failed on iteration #%d", 0x0);
+        DOCA_LOG_ERR("Client→Server(%s) client_server_send_recv filed", (is_receiver ? "server": "client"));
         goto out;
-    }
-
-    /* FIN message in reverse direction to acknowledge delivery */
-    ret = client_server_communication(ucp_worker, ep, send_recv_type, !is_server, i + 1);
-    if (ret != 0) {
-        DOCA_LOG_ERR("%s failed on FIN message", (is_server ? "server": "client"));
-        goto out;
-    }
-
-    printf("%s FIN message\n", is_server ? "sent" : "received");
-
-    /* Server waits until the client closed the connection after receiving FIN */
-    while (is_server && !connection_closed) {
-        ucp_worker_progress(ucp_worker);
     }
 
 out:
@@ -937,12 +880,13 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
     }
 
     /* Server is always up listening */
-    while (1) {
+    while (!quit_app) {
         /* Wait for the server to receive a connection request from the client.
          * If there are multiple clients for which the server's connection request
          * callback is invoked, i.e. several clients are trying to connect in
          * parallel, the server will handle only the first one and reject the rest */
         while (context.conn_request == NULL) {
+            if (quit_app) goto err_listener;
             ucp_worker_progress(ucp_worker);
         }
 
@@ -957,11 +901,24 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
             goto err_listener;
         }
 
-        /* The server waits for all the iterations to complete before moving on
-         * to the next client */
-        ret = client_server_do_work(ucp_data_worker, server_ep, send_recv_type, 1);
-        if (ret != 0) {
-            goto err_ep;
+        char str[100];
+        while(!quit_app) {
+            /* The server waits for the data to complete before moving on
+            * to the next client */
+            printf("Type charactors>");
+            memset(str, 0, sizeof(str));
+            fgets(str, sizeof(str), stdin);
+
+            // ここでSend or Recvを選択する必要がある．
+            // パラメータ
+            // - Send: sendの識別子，送信データ本体
+            // - Recv: recvの識別子
+            if (strlen(str)>1) {
+                ret = client_server_do_work(ucp_data_worker, server_ep, send_recv_type, 1, NULL, 0);
+                if (ret != 0) {
+                   goto err_ep;
+                }
+            }
         }
 
         /* Close the endpoint to the client */
@@ -998,8 +955,20 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
         goto out;
     }
 
-    ret = client_server_do_work(ucp_worker, client_ep, send_recv_type, 0);
+    char str[100];
+    while(!quit_app) {
+        printf("Type charactors>");
+        memset(str, 0, sizeof(str));
+        fgets(str, sizeof(str), stdin);
+        if (strlen(str)>1) {
+            ret = client_server_do_work(ucp_worker, client_ep, send_recv_type, 0, NULL, 0);
+            if (ret != 0) {
+                goto err_ep;
+            }
+        }
+    }
 
+err_ep:
     /* Close the endpoint to the server */
     ep_close(ucp_worker, client_ep, UCP_EP_CLOSE_FLAG_FORCE);
 
@@ -1059,13 +1028,26 @@ int main(int argc, char **argv)
     char *server_addr = NULL;
     char *listen_addr = NULL;
 
-    doca_error_t result;
+    int result;
 
     /* Create a logger backend that prints to the standard output */
-	result = doca_log_backend_create_standard();
+	result = (int)doca_log_backend_create_standard();
 	if (result != DOCA_SUCCESS) {
 		return EXIT_FAILURE;
-	}    
+	}
+    
+    quit_app = false;
+    signal(SIGINT, signal_handler);
+    signal(SIGKILL, signal_handler);
+    signal(SIGTERM, signal_handler);
+
+    ucp_config_t *ucp_config;
+    result = ucp_config_read(NULL, NULL, &ucp_config);
+    if (result !=UCS_OK) {
+        return EXIT_FAILURE;
+    }
+    ucp_config_print(ucp_config, stdout, "CONFIG", UCS_CONFIG_PRINT_CONFIG);
+    ucp_config_release(ucp_config);
 
     /* UCP objects */
     ucp_context_h ucp_context;
@@ -1073,13 +1055,13 @@ int main(int argc, char **argv)
 
     DOCA_LOG_INFO("COMPRESS_PROXY pid = %d", getpid());
 
-    result = (doca_error_t)parse_cmd(argc, argv, &server_addr, &listen_addr, &send_recv_type);
+    result = parse_cmd(argc, argv, &server_addr, &listen_addr, &send_recv_type);
     if (result != 0) {
         goto err;
     }
 
     /* Initialize the UCX required objects */
-    result =  (doca_error_t)init_context(&ucp_context, &ucp_worker, send_recv_type);
+    result =  init_context(&ucp_context, &ucp_worker, send_recv_type);
     if (result != 0) {
         goto err;
     }
@@ -1087,10 +1069,10 @@ int main(int argc, char **argv)
     /* Client-Server initialization */
     if (server_addr == NULL) {
         /* Server side */
-        result = (doca_error_t)run_server(ucp_context, ucp_worker, listen_addr, send_recv_type);
+        result = run_server(ucp_context, ucp_worker, listen_addr, send_recv_type);
     } else {
         /* Client side */
-        result = (doca_error_t)run_client(ucp_worker, server_addr, send_recv_type);
+        result = run_client(ucp_worker, server_addr, send_recv_type);
     }
 
     ucp_worker_destroy(ucp_worker);

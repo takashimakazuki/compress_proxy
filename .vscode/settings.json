@@ -34,7 +34,8 @@
         "doca_mmap.h": "c",
         "doca_buf_inventory.h": "c",
         "type_traits": "c",
-        "getopt_core.h": "c"
+        "getopt_core.h": "c",
+        "random": "c"
     },
     "C_Cpp.default.includePath": [
         // "/opt/mellanox/dpdk/include/dpdk",

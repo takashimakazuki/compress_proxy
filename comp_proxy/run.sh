@@ -9,13 +9,15 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
+export UCX_TCP_CM_REUSEADDR=y
+export UCX_NET_DEVICES=enp3s0f1s0
 case $1 in
     "s")
         ./buildarm/compress_proxy ${@:2}
         ;;
 
     "c")
-        ./buildarm/compress_proxy -a 192.168.200.12 ${@:2}
+        ./buildarm/compress_proxy -a 192.168.200.13 ${@:2}
         ;;
 
     *)
