@@ -12,17 +12,24 @@
 
 ## Setup
 
+ホストマシン上に本gitリポジトリをクローンし，BlueField-2 DPUのファイルシステムにNFSマウントする方法で開発環境をセットアップする．
+
+
 ```
-# /etc/exports
-/home/k-takashima/dpdk_compression 192.168.100.0/30(rw,sync,no_wdelay,no_subtree_check)
+# /etc/exports　ホストマシンのファイル内に以下を追加
+/home/k-takashima/compress_proxy 192.168.100.0/30(rw,sync,no_wdelay,no_subtree_check)
 ```
 
 ```
-$ sudo mount -t nfs 192.168.100.1:/path/to/compress_proxy /home/ubuntu/compress_proxy -o hard,intr
+host$ git clone git@github.com:takashimakazuki/compress_proxy.git
+host$ sudo mount -t nfs 192.168.100.1:/path/to/compress_proxy /home/ubuntu/compress_proxy -o hard,intr
 ```
 
 ## Run
 
 ```
-dpu$ cd comp_proxy && ./run.sh
+dpu$ cd comp_proxy
+dpu$ meson buildarm # Build settings for ARM64
+dpu$ ninja -C buildarm/
+dpu$ ./run.sh
 ```
