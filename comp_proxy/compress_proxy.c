@@ -299,13 +299,10 @@ static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
         fprintf(stderr, "unable to %s UCX message (%s)\n",
                 is_server ? "receive": "send", ucs_status_string(status));
         ret = -1;
-        goto release_iov;
+        return ret;
     }
 
     print_result(is_server, iov);
-
-release_iov:
-    buffer_free(iov);
     return ret;
 }
 
@@ -340,34 +337,21 @@ fill_request_param(ucp_dt_iov_t *iov, int is_client,
  * The client sends a message to the server and waits until the send it completed.
  * The server receives a message from the client and waits for its completion.
  */
-static int send_recv_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
+static int send_recv_stream(
+    ucp_worker_h ucp_worker, ucp_ep_h ep, 
+    int is_receiver, void *buf, size_t buf_len)
 {
     ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     ucp_request_param_t param;
     test_req_t *request;
     test_req_t ctx;
+    int is_sender = !is_receiver;
 
 
     /* Allocate iov buffer for send/recv data */
     memset(iov, 0, iov_cnt * sizeof(*iov));
-    iov[0].length = test_string_length;
-    iov[0].buffer = mem_type_malloc(iov[0].length);
-    if (iov[0].buffer == NULL) {
-        mem_type_free(iov[0].buffer);
-        return -1;
-    }
-
-
-    /* Client side: Fill in buffer message */
-    if (!is_server) {
-        char *tmp_str;
-        tmp_str = calloc(1, test_string_length);
-        for(size_t idx = 0; idx < test_string_length-1; idx++) {
-            tmp_str[idx] = 'a';
-        }
-        mem_type_memcpy(iov[0].buffer, tmp_str, iov[0].length);
-        free(tmp_str);
-    }
+    iov[0].buffer = buf; // if this process is sender, buf has data to send.
+    iov[0].length = buf_len;
 
     /* Set send/recv shared params */
     ctx.complete       = 0;
@@ -378,7 +362,7 @@ static int send_recv_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
     param.user_data    = &ctx;
 
 
-    if (!is_server) {
+    if (is_sender) {
         /* Client sends a message to the server using the stream API */
         param.cb.send = send_cb;
         request       = ucp_stream_send_nbx(ep, iov, iov_cnt, &param);
@@ -390,7 +374,7 @@ static int send_recv_stream(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
         request              = ucp_stream_recv_nbx(ep, iov, iov_cnt, NULL, &param);
     }
 
-    return request_finalize(ucp_worker, request, &ctx, is_server, iov);
+    return request_finalize(ucp_worker, request, &ctx, is_receiver, iov);
 }
 
 /**
@@ -667,22 +651,22 @@ static char* sockaddr_get_port_str(const struct sockaddr_storage *sock_addr,
 
 static int client_server_send_recv(ucp_worker_h worker, ucp_ep_h ep,
                                        send_recv_type_t send_recv_type,
-                                       int is_server)
+                                       int is_receiver, void *buf, size_t buf_len)
 {
     int ret;
 
     switch (send_recv_type) {
     case CLIENT_SERVER_SEND_RECV_STREAM:
         /* Client-Server communication via Stream API */
-        ret = send_recv_stream(worker, ep, is_server);
+        ret = send_recv_stream(worker, ep, is_receiver, buf, buf_len);
         break;
     case CLIENT_SERVER_SEND_RECV_TAG:
         /* Client-Server communication via Tag-Matching API */
-        ret = send_recv_tag(worker, ep, is_server);
+        ret = send_recv_tag(worker, ep, is_receiver);
         break;
     case CLIENT_SERVER_SEND_RECV_AM:
         /* Client-Server communication via AM API. */
-        ret = send_recv_am(worker, ep, is_server);
+        ret = send_recv_am(worker, ep, is_receiver);
         break;
     default:
         fprintf(stderr, "unknown send-recv type %d\n", send_recv_type);
@@ -830,24 +814,6 @@ out:
 }
 
 
-static int client_server_do_work(
-    ucp_worker_h ucp_worker, ucp_ep_h ep,
-    send_recv_type_t send_recv_type, int is_receiver, 
-    void *buf, size_t buf_len)
-{
-    int ret = 0;
-
-    DOCA_LOG_INFO("DATA C->S(%s)", cpxy_sendrecv_type_string(send_recv_type));
-    ret = client_server_send_recv(ucp_worker, ep, send_recv_type, is_receiver);
-    if (ret != 0) {
-        DOCA_LOG_ERR("Client→Server(%s) client_server_send_recv filed", (is_receiver ? "server": "client"));
-        goto out;
-    }
-
-out:
-    return ret;
-}
-
 static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
                       char *listen_addr, send_recv_type_t send_recv_type)
 {
@@ -905,7 +871,7 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
         while(!quit_app) {
             /* The server waits for the data to complete before moving on
             * to the next client */
-            printf("Type charactors>");
+            printf("Type any key to call recv>");
             memset(str, 0, sizeof(str));
             fgets(str, sizeof(str), stdin);
 
@@ -914,7 +880,10 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
             // - Send: sendの識別子，送信データ本体
             // - Recv: recvの識別子
             if (strlen(str)>1) {
-                ret = client_server_do_work(ucp_data_worker, server_ep, send_recv_type, 1, NULL, 0);
+                DOCA_LOG_INFO("DATA C->S(%s)", cpxy_sendrecv_type_string(send_recv_type));
+                ret = client_server_send_recv(ucp_data_worker, server_ep, send_recv_type, 1, str, sizeof(str));
+
+                printf("received: %s", str);
                 if (ret != 0) {
                    goto err_ep;
                 }
@@ -957,11 +926,12 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
 
     char str[100];
     while(!quit_app) {
-        printf("Type charactors>");
+        printf("Type charactors to send>");
         memset(str, 0, sizeof(str));
         fgets(str, sizeof(str), stdin);
         if (strlen(str)>1) {
-            ret = client_server_do_work(ucp_worker, client_ep, send_recv_type, 0, NULL, 0);
+            DOCA_LOG_INFO("DATA C->S(%s)", cpxy_sendrecv_type_string(send_recv_type));
+            ret = client_server_send_recv(ucp_worker, client_ep, send_recv_type, 0, str, sizeof(str));
             if (ret != 0) {
                 goto err_ep;
             }
