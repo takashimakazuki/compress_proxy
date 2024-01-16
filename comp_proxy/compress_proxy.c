@@ -244,9 +244,9 @@ static void print_iov(const ucp_dt_iov_t *iov)
  * side.
  */
 static
-void print_result(int is_server, const ucp_dt_iov_t *iov)
+void print_result(int is_receiver, const ucp_dt_iov_t *iov)
 {
-    if (is_server) {
+    if (is_receiver) {
         printf("Server\n");
         printf("UCX data message was received\n");
         printf("\n\n----- UCP TEST SUCCESS -------\n\n");
@@ -289,7 +289,7 @@ static ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request,
 }
 
 static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
-                            test_req_t *ctx, int is_server, ucp_dt_iov_t *iov)
+                            test_req_t *ctx, int is_receiver, ucp_dt_iov_t *iov)
 {
     int ret = 0;
     ucs_status_t status;
@@ -297,12 +297,12 @@ static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
     status = request_wait(ucp_worker, request, ctx);
     if (status != UCS_OK) {
         fprintf(stderr, "unable to %s UCX message (%s)\n",
-                is_server ? "receive": "send", ucs_status_string(status));
+                is_receiver ? "receive": "send", ucs_status_string(status));
         ret = -1;
         return ret;
     }
 
-    print_result(is_server, iov);
+    print_result(is_receiver, iov);
     return ret;
 }
 
@@ -382,7 +382,7 @@ static int send_recv_stream(
  * The client sends a message to the server and waits until the send it completed.
  * The server receives a message from the client and waits for its completion.
  */
-static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
+static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_receiver)
 {
     ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     ucp_request_param_t param;
@@ -393,12 +393,12 @@ static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
 
     memset(iov, 0, iov_cnt * sizeof(*iov));
 
-    if (fill_request_param(iov, !is_server, &msg, &msg_length,
+    if (fill_request_param(iov, !is_receiver, &msg, &msg_length,
                            &ctx, &param) != 0) {
         return -1;
     }
 
-    if (!is_server) {
+    if (!is_receiver) {
         /* Client sends a message to the server using the Tag-Matching API */
         param.cb.send = send_cb;
         request       = ucp_tag_send_nbx(ep, msg, msg_length, TAG, &param);
@@ -409,7 +409,7 @@ static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
                                          &param);
     }
 
-    return request_finalize(ucp_worker, request, &ctx, is_server, iov);
+    return request_finalize(ucp_worker, request, &ctx, is_receiver, iov);
 }
 
 ucs_status_t ucp_am_data_cb(void *arg, const void *header, size_t header_length,
@@ -465,7 +465,7 @@ ucs_status_t ucp_am_data_cb(void *arg, const void *header, size_t header_length,
  * The server gets a message from the client and if it is rendezvous request,
  * initiates receive operation.
  */
-static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
+static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_receiver)
 {
     ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     test_req_t *request;
@@ -476,12 +476,12 @@ static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
 
     memset(iov, 0, iov_cnt * sizeof(*iov));
 
-    if (fill_request_param(iov, !is_server, &msg, &msg_length,
+    if (fill_request_param(iov, !is_receiver, &msg, &msg_length,
                            &ctx, &params) != 0) {
         return -1;
     }
 
-    if (is_server) {
+    if (is_receiver) {
         am_data_desc.recv_buf = iov;
 
         /* waiting for AM callback has called */
@@ -512,7 +512,7 @@ static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_server)
         request        = ucp_am_send_nbx(ep, TEST_AM_ID, NULL, 0ul, msg, msg_length, &params);
     }
 
-    return request_finalize(ucp_worker, request, &ctx, is_server, iov);
+    return request_finalize(ucp_worker, request, &ctx, is_receiver, iov);
 }
 
 /**
@@ -871,7 +871,7 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
         while(!quit_app) {
             /* The server waits for the data to complete before moving on
             * to the next client */
-            printf("Type any key to call recv>");
+            printf("cmd>");
             memset(str, 0, sizeof(str));
             fgets(str, sizeof(str), stdin);
 
@@ -880,8 +880,16 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
             // - Send: sendの識別子，送信データ本体
             // - Recv: recvの識別子
             if (strlen(str)>1) {
-                DOCA_LOG_INFO("DATA C->S(%s)", cpxy_sendrecv_type_string(send_recv_type));
-                ret = client_server_send_recv(ucp_data_worker, server_ep, send_recv_type, 1, str, sizeof(str));
+                int is_receiver = 0;
+                if (strncmp(str, "snd", 3) == 0) {
+                    is_receiver = 0;
+                } else if (strncmp(str, "rcv", 3) == 0) {
+                    is_receiver = 1;
+                } else {
+                    continue;
+                }
+                DOCA_LOG_INFO("DATA/%s/%s", cpxy_sendrecv_type_string(send_recv_type), (is_receiver ? "C->S" : "S->C"));
+                ret = client_server_send_recv(ucp_data_worker, server_ep, send_recv_type, is_receiver, str, sizeof(str));
 
                 printf("received: %s", str);
                 if (ret != 0) {
@@ -926,12 +934,20 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
 
     char str[100];
     while(!quit_app) {
-        printf("Type charactors to send>");
+        printf("cmd>");
         memset(str, 0, sizeof(str));
         fgets(str, sizeof(str), stdin);
         if (strlen(str)>1) {
-            DOCA_LOG_INFO("DATA C->S(%s)", cpxy_sendrecv_type_string(send_recv_type));
-            ret = client_server_send_recv(ucp_worker, client_ep, send_recv_type, 0, str, sizeof(str));
+            int is_receiver = 0;
+            if (strncmp(str, "snd", 3) == 0) {
+                is_receiver = 0;
+            } else if (strncmp(str, "rcv", 3) == 0) {
+                is_receiver = 1;
+            } else {
+                continue;
+            }
+            DOCA_LOG_INFO("DATA/%s/%s", cpxy_sendrecv_type_string(send_recv_type), (is_receiver ? "C->S" : "S->C"));
+            ret = client_server_send_recv(ucp_worker, client_ep, send_recv_type, is_receiver, str, sizeof(str));
             if (ret != 0) {
                 goto err_ep;
             }
