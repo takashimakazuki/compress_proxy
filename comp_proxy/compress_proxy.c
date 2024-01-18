@@ -2,15 +2,17 @@
  * UCP client - server example utility
  * -----------------------------------------------
  * Server side:
- *    ./ucp_client_server
+ *    ./compress_proxy
  * Client side:
- *    ./ucp_client_server -a <server-ip>
+ *    ./compress_proxy -a <server-ip>
  * 
- * default: CLIENT_SERVER_SEND_RECV_DEFAULT (stream)
+ * - default send type: CLIENT_SERVER_SEND_RECV_DEFAULT (stream)
+ * - send_recv_tag/send_recv_am is not implemented.
  */
 
 #include "hello_world_util.h"
 #include "ucp_util.h"
+#include "common.h"
 #include "compress_proxy.h"
 
 #include <ucp/api/ucp.h>
@@ -34,16 +36,14 @@
 #define TAG                    0xCAFE
 #define COMM_TYPE_DEFAULT      "STREAM"
 #define PRINT_INTERVAL         2000
-#define DEFAULT_NUM_ITERATIONS 1
 #define TEST_AM_ID             0
 
-DOCA_LOG_REGISTER(COMPRESS_PROXY)
+DOCA_LOG_REGISTER(COMPRESS_PROXY);
 
 static size_t test_string_length = 200;
 static size_t iov_cnt            = 1;
 static uint16_t server_port    = DEFAULT_PORT;
 static sa_family_t ai_family   = AF_INET;
-static int num_iterations      = DEFAULT_NUM_ITERATIONS;
 static int connection_closed   = 1;
 
 static bool quit_app;		/* Shared variable to allow for a proper shutdown */
@@ -247,11 +247,11 @@ static
 void print_result(int is_receiver, const ucp_dt_iov_t *iov)
 {
     if (is_receiver) {
-        printf("Server\n");
+        printf("Receiver\n");
         printf("UCX data message was received\n");
         printf("\n\n----- UCP TEST SUCCESS -------\n\n");
     } else {
-        printf("Client\n");
+        printf("Sender\n");
         printf("\n\n------------------------------\n\n");
     }
 
@@ -520,30 +520,12 @@ static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_receiver)
  */
 static void usage()
 {
-    fprintf(stderr, "Usage: ucp_client_server [parameters]\n");
-    fprintf(stderr, "UCP client-server example utility\n");
+    fprintf(stderr, "Usage: compress_proxy [parameters]\n");
+    fprintf(stderr, "UCP client-server utility\n");
     fprintf(stderr, "\nParameters are:\n");
     fprintf(stderr, "  -a Set IP address of the server "
                     "(required for client and should not be specified "
                     "for the server)\n");
-    fprintf(stderr, "  -l Set IP address where server listens "
-                    "(If not specified, server uses INADDR_ANY; "
-                    "Irrelevant at client)\n");
-    fprintf(stderr, "  -p Port number to listen/connect to (default = %d). "
-                    "0 on the server side means select a random port and print it\n",
-                    DEFAULT_PORT);
-    fprintf(stderr, "  -c Communication type for the client and server. "
-                    "  Valid values are:\n"
-                    "      'stream' : Stream API\n"
-                    "      'tag'    : Tag API\n"
-                    "      'am'     : AM API\n"
-                    "     If not specified, %s API will be used.\n", COMM_TYPE_DEFAULT);
-    fprintf(stderr, "  -i Number of iterations to run. Client and server must "
-                    "have the same value. (default = %d).\n",
-                    num_iterations);
-    fprintf(stderr, "  -v Number of buffers in a single data "
-                    "transfer function call. (default = %ld).\n",
-                    iov_cnt);
     print_common_help();
     fprintf(stderr, "\n");
 }
@@ -551,73 +533,73 @@ static void usage()
 /**
  * Parse the command line arguments.
  */
-static int parse_cmd(int argc, char *const argv[], char **server_addr,
-                     char **listen_addr, send_recv_type_t *send_recv_type)
-{
-    int c = 0;
-    int port;
+// static int parse_cmd(int argc, char *const argv[], char **server_addr,
+//                      char **listen_addr, send_recv_type_t *send_recv_type)
+// {
+//     int c = 0;
+//     int port;
 
-    while ((c = getopt(argc, argv, "a:l:p:c:i:s:v:m:h")) != -1) {
-        switch (c) {
-        case 'a':
-            *server_addr = optarg;
-            break;
-        case 'c':
-            if (!strcasecmp(optarg, "stream")) {
-                *send_recv_type = CLIENT_SERVER_SEND_RECV_STREAM;
-            } else if (!strcasecmp(optarg, "tag")) {
-                *send_recv_type = CLIENT_SERVER_SEND_RECV_TAG;
-            } else if (!strcasecmp(optarg, "am")) {
-                *send_recv_type = CLIENT_SERVER_SEND_RECV_AM;
-            } else {
-                fprintf(stderr, "Wrong communication type %s. "
-                        "Using %s as default\n", optarg, COMM_TYPE_DEFAULT);
-                *send_recv_type = CLIENT_SERVER_SEND_RECV_DEFAULT;
-            }
-            break;
-        case 'l':
-            *listen_addr = optarg;
-            break;
-        case 'p':
-            port = atoi(optarg);
-            if ((port < 0) || (port > UINT16_MAX)) {
-                fprintf(stderr, "Wrong server port number %d\n", port);
-                return -1;
-            }
-            server_port = port;
-            break;
-        case 'i':
-            num_iterations = atoi(optarg);
-            break;
-        case 's':
-            test_string_length = atol(optarg);
-            if (test_string_length < 0) {
-                fprintf(stderr, "Wrong string size %ld\n", test_string_length);
-                return UCS_ERR_UNSUPPORTED;
-            }
-            break;
-        case 'v':
-            iov_cnt = atol(optarg);
-            if (iov_cnt <= 0) {
-                fprintf(stderr, "Wrong iov count %ld\n", iov_cnt);
-                return UCS_ERR_UNSUPPORTED;
-            }
-            break;
-        case 'm':
-            test_mem_type = parse_mem_type(optarg);
-            if (test_mem_type == UCS_MEMORY_TYPE_LAST) {
-                return UCS_ERR_UNSUPPORTED;
-            }
-            break;
-        case 'h':
-        default:
-            usage();
-            return -1;
-        }
-    }
+//     while ((c = getopt(argc, argv, "a:l:p:c:i:s:v:m:h")) != -1) {
+//         switch (c) {
+//         case 'a':
+//             *server_addr = optarg;
+//             break;
+//         case 'c':
+//             if (!strcasecmp(optarg, "stream")) {
+//                 *send_recv_type = CLIENT_SERVER_SEND_RECV_STREAM;
+//             } else if (!strcasecmp(optarg, "tag")) {
+//                 *send_recv_type = CLIENT_SERVER_SEND_RECV_TAG;
+//             } else if (!strcasecmp(optarg, "am")) {
+//                 *send_recv_type = CLIENT_SERVER_SEND_RECV_AM;
+//             } else {
+//                 fprintf(stderr, "Wrong communication type %s. "
+//                         "Using %s as default\n", optarg, COMM_TYPE_DEFAULT);
+//                 *send_recv_type = CLIENT_SERVER_SEND_RECV_DEFAULT;
+//             }
+//             break;
+//         case 'l':
+//             *listen_addr = optarg;
+//             break;
+//         case 'p':
+//             port = atoi(optarg);
+//             if ((port < 0) || (port > UINT16_MAX)) {
+//                 fprintf(stderr, "Wrong server port number %d\n", port);
+//                 return -1;
+//             }
+//             server_port = port;
+//             break;
+//         case 'i':
+//             num_iterations = atoi(optarg);
+//             break;
+//         case 's':
+//             test_string_length = atol(optarg);
+//             if (test_string_length < 0) {
+//                 fprintf(stderr, "Wrong string size %ld\n", test_string_length);
+//                 return UCS_ERR_UNSUPPORTED;
+//             }
+//             break;
+//         case 'v':
+//             iov_cnt = atol(optarg);
+//             if (iov_cnt <= 0) {
+//                 fprintf(stderr, "Wrong iov count %ld\n", iov_cnt);
+//                 return UCS_ERR_UNSUPPORTED;
+//             }
+//             break;
+//         case 'm':
+//             test_mem_type = parse_mem_type(optarg);
+//             if (test_mem_type == UCS_MEMORY_TYPE_LAST) {
+//                 return UCS_ERR_UNSUPPORTED;
+//             }
+//             break;
+//         case 'h':
+//         default:
+//             usage();
+//             return -1;
+//         }
+//     }
 
-    return 0;
-}
+//     return 0;
+// }
 
 static char* sockaddr_get_ip_str(const struct sockaddr_storage *sock_addr,
                                  char *ip_str, size_t max_size)
@@ -1008,20 +990,190 @@ err:
 }
 
 
+/*
+ * ARGP Callback - Handle Comm Channel DOCA device PCI address paramet|er
+ *
+ * @param [in]: Input parameter
+ * @config [in/out]: Program configuration context
+ * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
+ */
+static doca_error_t pci_addr_callback(void *param, void *config)
+{
+	struct cpxy_config *cfg = (struct cpxy_config *)config;
+	const char *dev_pci_addr = (char *)param;
+	int len;
+
+	len = strnlen(dev_pci_addr, PCI_ADDR_LEN);
+	/* Check using >= to make static code analysis satisfied */
+	if (len >= PCI_ADDR_LEN) {
+		DOCA_LOG_ERR("Entered device PCI address exceeding the maximum size of %d", USER_PCI_ADDR_LEN);
+		return DOCA_ERROR_INVALID_VALUE;
+	}
+
+	/* The string will be '\0' terminated due to the strnlen check above */
+	strncpy(cfg->cc_dev_pci_addr, dev_pci_addr, len + 1);
+
+	return DOCA_SUCCESS;
+}
+
+/*
+ * ARGP Callback - Handle Comm Channel DOCA device representor PCI address parameter
+ *
+ * @param [in]: Input parameter
+ * @config [in/out]: Program configuration context
+ * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
+ */
+static doca_error_t rep_pci_addr_callback(void *param, void *config)
+{
+	struct cpxy_config *cfg = (struct cpxy_config *)config;
+	const char *rep_pci_addr = (char *)param;
+	int len;
+
+	len = strnlen(rep_pci_addr, PCI_ADDR_LEN);
+	/* Check using >= to make static code analysis satisfied */
+	if (len >= PCI_ADDR_LEN) {
+		DOCA_LOG_ERR("Entered device representor PCI address exceeding the maximum size of %d",
+			     USER_PCI_ADDR_LEN);
+		return DOCA_ERROR_INVALID_VALUE;
+	}
+
+	/* The string will be '\0' terminated due to the strnlen check above */
+	strncpy(cfg->cc_dev_rep_pci_addr, rep_pci_addr, len + 1);
+
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t server_ip_addr_callback(void *param, void *config)
+{
+	struct cpxy_config *cfg = (struct cpxy_config *)config;
+	const char *server_ip_addr = (char *)param;
+	int len;
+
+	len = strnlen(server_ip_addr, IP_ADDR_LEN);
+	if (len >= IP_ADDR_LEN) {
+		DOCA_LOG_ERR("Entered server ip address exceeding the maximum size of %d",
+			     IP_ADDR_LEN);
+		return DOCA_ERROR_INVALID_VALUE;
+	}
+
+	strncpy(cfg->server_ip_addr, server_ip_addr, len + 1);
+
+	return DOCA_SUCCESS;
+}
+
+doca_error_t register_cpxy_params()
+{
+	doca_error_t result;
+
+	struct doca_argp_param 
+        *dev_pci_addr_param, *rep_pci_addr_param,
+        *server_ip_addr_param;
+
+	/* Comm Channel DOCA device PCI address */
+	result = doca_argp_param_create(&dev_pci_addr_param);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to create ARGP param: %s", doca_error_get_descr(result));
+		return result;
+	}
+	doca_argp_param_set_short_name(dev_pci_addr_param, "p");
+	doca_argp_param_set_long_name(dev_pci_addr_param, "pci-addr");
+	doca_argp_param_set_description(dev_pci_addr_param, "DOCA Comm Channel device PCI address");
+	doca_argp_param_set_callback(dev_pci_addr_param, pci_addr_callback);
+	doca_argp_param_set_type(dev_pci_addr_param, DOCA_ARGP_TYPE_STRING);
+	result = doca_argp_register_param(dev_pci_addr_param);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to register program param: %s", doca_error_get_descr(result));
+		return result;
+	}
+
+	/* Comm Channel DOCA device representor PCI address */
+	result = doca_argp_param_create(&rep_pci_addr_param);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to create ARGP param: %s", doca_error_get_descr(result));
+		return result;
+	}
+	doca_argp_param_set_short_name(rep_pci_addr_param, "r");
+	doca_argp_param_set_long_name(rep_pci_addr_param, "rep-pci");
+	doca_argp_param_set_description(rep_pci_addr_param,
+					"DOCA Comm Channel device representor PCI address (needed only on DPU)");
+	doca_argp_param_set_callback(rep_pci_addr_param, rep_pci_addr_callback);
+	doca_argp_param_set_type(rep_pci_addr_param, DOCA_ARGP_TYPE_STRING);
+	result = doca_argp_register_param(rep_pci_addr_param);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to register program param: %s", doca_error_get_descr(result));
+		return result;
+	}
+
+    /* Server IP address */
+    result = doca_argp_param_create(&server_ip_addr_param);
+    if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to create ARGP param: %s", doca_error_get_descr(result));
+		return result;
+	}
+	doca_argp_param_set_short_name(server_ip_addr_param, "a");
+	doca_argp_param_set_long_name(server_ip_addr_param, "server-addr");
+	doca_argp_param_set_description(server_ip_addr_param,
+					"Server IP address (needed only on DPU&client)");
+	doca_argp_param_set_callback(server_ip_addr_param, server_ip_addr_callback);
+	doca_argp_param_set_type(server_ip_addr_param, DOCA_ARGP_TYPE_STRING);
+	result = doca_argp_register_param(server_ip_addr_param);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to register program param: %s", doca_error_get_descr(result));
+		return result;
+	}
+
+    /* Send/Recv type (stream,tag,am) */
+
+	return DOCA_SUCCESS;
+}
+
+void print_cpxy_config(struct cpxy_config *cfg)
+{
+    printf("-------------COMPRESS-PROXY config----------------\n");
+    printf("cfg->server_ip_addr: %s\n", cfg->server_ip_addr);
+    printf("-----------------------------\n");
+
+}
+
+
 int main(int argc, char **argv)
 {
+	struct cpxy_config cfg;
     send_recv_type_t send_recv_type = CLIENT_SERVER_SEND_RECV_DEFAULT;
-    char *server_addr = NULL;
     char *listen_addr = NULL;
-
     int result;
+
+    strcpy(cfg.cc_dev_pci_addr, "0c:00.1");
+	strcpy(cfg.cc_dev_rep_pci_addr, "82:00.1");
+	strcpy(cfg.server_ip_addr, "");
 
     /* Create a logger backend that prints to the standard output */
 	result = (int)doca_log_backend_create_standard();
 	if (result != DOCA_SUCCESS) {
 		return EXIT_FAILURE;
 	}
-    
+
+    /* Parse cmdline/json arguments */
+    result = (int)doca_argp_init("compress_proxy", &cfg);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to init ARGP resources: %s", doca_error_get_descr(result));
+		return EXIT_FAILURE;
+    }
+
+    result = register_cpxy_params();
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to register parameters: %s",
+			     doca_error_get_descr(result));
+		return EXIT_FAILURE;
+    }
+
+    result = doca_argp_start(argc, argv);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to parse input: %s", doca_error_get_descr(result));
+		return EXIT_FAILURE;
+	}
+
+    /* Set signal handler */
     quit_app = false;
     signal(SIGINT, signal_handler);
     signal(SIGKILL, signal_handler);
@@ -1035,16 +1187,13 @@ int main(int argc, char **argv)
     ucp_config_print(ucp_config, stdout, "CONFIG", UCS_CONFIG_PRINT_CONFIG);
     ucp_config_release(ucp_config);
 
+    print_cpxy_config(&cfg);
+
     /* UCP objects */
     ucp_context_h ucp_context;
     ucp_worker_h  ucp_worker;
 
     DOCA_LOG_INFO("COMPRESS_PROXY pid = %d", getpid());
-
-    result = parse_cmd(argc, argv, &server_addr, &listen_addr, &send_recv_type);
-    if (result != 0) {
-        goto err;
-    }
 
     /* Initialize the UCX required objects */
     result =  init_context(&ucp_context, &ucp_worker, send_recv_type);
@@ -1053,12 +1202,12 @@ int main(int argc, char **argv)
     }
 
     /* Client-Server initialization */
-    if (server_addr == NULL) {
+    if (strlen(cfg.server_ip_addr) == 0) {
         /* Server side */
         result = run_server(ucp_context, ucp_worker, listen_addr, send_recv_type);
     } else {
         /* Client side */
-        result = run_client(ucp_worker, server_addr, send_recv_type);
+        result = run_client(ucp_worker, cfg.server_ip_addr, send_recv_type);
     }
 
     ucp_worker_destroy(ucp_worker);

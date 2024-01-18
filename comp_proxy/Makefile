@@ -1,3 +1,7 @@
+# This Makefile is not used
+# See meson.build file and use meson command
+
+
 CC  = gcc
 PKGCONF ?= pkg-config
 CFLAGS = -Wall -g -D DOCA_LOGGING_ALLOW_DLOG

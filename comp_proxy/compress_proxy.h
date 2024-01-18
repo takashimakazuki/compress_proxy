@@ -10,15 +10,15 @@ typedef enum {
 } send_recv_type_t;
 
 char *cpxy_sendrecv_type_string(send_recv_type_t type) {
-        switch (type) {
-        case CLIENT_SERVER_SEND_RECV_STREAM:
-            return "RECV_STREAM";
-        case CLIENT_SERVER_SEND_RECV_TAG:
-            return "RECV_TAG";
-        case CLIENT_SERVER_SEND_RECV_AM:
-            return "RECV_AM";
-        default:
-            return "Unknown send_recv_type";
+    switch (type) {
+    case CLIENT_SERVER_SEND_RECV_STREAM:
+        return "RECV_STREAM";
+    case CLIENT_SERVER_SEND_RECV_TAG:
+        return "RECV_TAG";
+    case CLIENT_SERVER_SEND_RECV_AM:
+        return "RECV_AM";
+    default:
+        return "Unknown send_recv_type";
     }
 
 }
@@ -52,5 +52,17 @@ static struct {
     void         *desc;
     void         *recv_buf;
 } am_data_desc = {0, 0, NULL, NULL};
+
+
+/* Comm Channel config data */
+#define USER_PCI_ADDR_LEN 7					/* User PCI address string length */
+#define PCI_ADDR_LEN (USER_PCI_ADDR_LEN + 1)			/* PCI address string length */
+#define IP_ADDR_LEN 16
+
+struct cpxy_config {
+    char cc_dev_pci_addr[PCI_ADDR_LEN];			/* Comm Channel DOCA device PCI address */
+	char cc_dev_rep_pci_addr[PCI_ADDR_LEN];			/* Comm Channel DOCA device representor PCI address */
+    char server_ip_addr[IP_ADDR_LEN];
+};
 
 #endif
