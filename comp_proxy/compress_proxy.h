@@ -65,4 +65,11 @@ struct cpxy_config {
     char server_ip_addr[IP_ADDR_LEN];
 };
 
+struct cpxy_cc_objects {
+    struct doca_comm_channel_ep_t *cc_ep;
+    struct doca_comm_channel_addr_t *cc_peer_addr;
+    struct doca_dev *cc_dev;
+    struct doca_dev_rep *cc_dev_rep;
+};
+
 #endif

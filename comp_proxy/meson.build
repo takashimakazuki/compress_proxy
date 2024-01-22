@@ -56,5 +56,19 @@ inc_dir = include_directories(
     '.',
 )
 
+mpi_dpuoffload_src = [
+	'mpi_dpuoffload.c',
+	'common.c',
+]
 
-executable('compress_proxy', sources, dependencies : app_dependencies, include_directories : inc_dir, install: true)
+mpi_dpuoffload_inc_dir = include_directories(
+	'/opt/mellanox/doca/include',
+    'include',
+    '.',
+)
+
+if host_machine.cpu_family().startswith('x86')
+	executable('mpi_dpuoffload', mpi_dpuoffload_src, dependencies: app_dependencies, include_directories: mpi_dpuoffload_inc_dir, install : true)
+elif host_machine.cpu_family().startswith('arm') or host_machine.cpu_family().startswith('aarch')
+	executable('compress_proxy', sources, dependencies: app_dependencies, include_directories: inc_dir, install: true)
+endif

@@ -126,4 +126,6 @@ doca_error_t request_stop_ctx(struct doca_pe *pe, struct doca_ctx *ctx);
  */
 doca_error_t destroy_core_objects(struct program_core_objects *state);
 
+char *hex_dump(const void *data, size_t size);
+
 #endif

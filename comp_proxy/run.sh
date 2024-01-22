@@ -13,11 +13,12 @@ export UCX_TCP_CM_REUSEADDR=y
 export UCX_NET_DEVICES=enp3s0f1s0
 case $1 in
     "s")
-        ./buildarm/compress_proxy ${@:2}
+        # rdstore-bf
+        ./buildarm/compress_proxy
         ;;
 
-    "c")
-        ./buildarm/compress_proxy -a 192.168.200.13 ${@:2}
+    "c") # deepl-bf
+        ./buildarm/compress_proxy -a 192.168.200.13 -r 83:00.1 -p 03:00.1
         ;;
 
     *)
