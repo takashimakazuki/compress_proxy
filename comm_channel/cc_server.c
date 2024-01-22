@@ -180,7 +180,7 @@ int main(int argc, char **argv)
 {
     doca_error_t result;
     struct cc_config cfg;
-	const char *server_name = "cc_sample_server";
+	const char *server_name = "compress_proxy_cc";
 
 	/* Create a logger backend that prints to the standard output */
 	result = doca_log_backend_create_standard();

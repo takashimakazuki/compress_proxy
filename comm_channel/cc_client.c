@@ -53,7 +53,7 @@ signal_handler(int signum)
  * @return: DOCA_SUCCESS on success and DOCA_ERROR otherwise
  */
 doca_error_t
-create_comm_channel_client(const char *server_name, struct dev_pci_addr *dev_pci_addr, const char *text)
+create_comm_channel_client(const char *server_name, const char *dev_pci_addr, const char *text)
 {
 	doca_error_t result;
 	char rcv_buf[MAX_MSG_SIZE];
@@ -197,11 +197,11 @@ int
 main(int argc, char **argv)
 {
 	struct cc_config cfg;
-	const char *server_name = "cc_sample_server";
+	const char *server_name = "compress_proxy_cc";
 	doca_error_t result;
 
 	strcpy(cfg.cc_dev_pci_addr, "0c:00.1");
-	strcpy(cfg.text, "MESSAGE_FROM_CLIENT_AAA");
+	strcpy(cfg.text, "snd DATA_FROM_HOST");
 	/* Client, no need for the cc_dev_rep_pci_addr field */
 
 	/* Create a logger backend that prints to the standard output */

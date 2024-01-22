@@ -42,16 +42,11 @@ add_project_arguments('-D DOCA_LOGGING_ALLOW_DLOG', language: 'c')
 
 
 app_dependencies = []
-libdpdk_dep = dependency('libdpdk', required : true)
-if not libdpdk_dep.found()
-	error('please set PKG_CONFIG_PATH to dpdk packages path, for further instructions check DOCA manuals')
-endif
 libdoca_dep = dependency('doca', required : true)
 if not libdoca_dep.found()
     error('please set PKG_CONFIG_PATH to doca packages path')
 endif
 
-app_dependencies += libdpdk_dep
 app_dependencies += libdoca_dep
 
 client_sources = [

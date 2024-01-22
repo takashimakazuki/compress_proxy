@@ -3,7 +3,6 @@
 set -x ## Display commands
 set -e ## Enable error check
 
-make
 
 
 if [ $# -eq 0 ]; then
@@ -13,15 +12,11 @@ fi
 
 case $1 in
     "s")
-        make clean
-        make cc_server
         ./cc_server
         ;;
 
     "c")
-        make clean
-        make cc_client
-        ./cc_client
+        ./build/cc_client
         ;;
 
     *)
