@@ -15,9 +15,9 @@
 
 
 struct mpi_dpuo_config {
-	char cc_dev_pci_addr[PCI_ADDR_LEN];			/* Comm Channel DOCA device PCI address */
-	char text[MAX_TXT_SIZE];				/* Text to send to Comm Channel server */
-	bool is_sender;
+	char cc_dev_pci_addr[PCI_ADDR_LEN];		/* Comm Channel DOCA device PCI address */
+	char text[MAX_TXT_SIZE];				/* DEBUG: Text to send to Comm Channel server */
+	bool is_sender;                         /* DEBUG: sender/receiver */
 };
 
 doca_error_t register_mpi_dpuo_params(void);

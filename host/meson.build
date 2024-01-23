@@ -45,6 +45,7 @@ app_dependencies += libmpi_dep
 
 lib_sources = [
 	'extern_dpuo.c',
+	'../comp_proxy/common.c',
 ]
 
 inc_dir = include_directories(
