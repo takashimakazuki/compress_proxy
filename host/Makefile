@@ -6,8 +6,12 @@ extern: extern.c
 extern_dpu: extern_dpu.c
 	$(CC) -shared $^ -o extern_dpu.so 
 
-test: test.c
-	$(CC) test.c -o test.o
+test_init: test_init.c
+	$(CC) test_init.c -o test_init.o
+
+test_send: test_send.c
+	$(CC) test_send.c -o test_send.o
+
 
 clean:
 	rm *.so

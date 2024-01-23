@@ -1,8 +1,20 @@
-#include "mpi.h"
+#include <mpi.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <doca_error.h>
 
+int MPI_Init(int *argc, char ***argv)
+{
+    static int init_count = 0;
+    static int ret = 0;
+    init_count++;
+
+    printf("\n---MPI_Init (OVERLOADED)---\n");
+    printf("MPI_Init: mpi_init entrance count %d...\n", init_count);
+    ret = PMPI_Init(argc, argv);
+    printf("+++MPI_Init (OVERLOADED) done!+++\n\n");
+
+    return ret;
+}
 
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
