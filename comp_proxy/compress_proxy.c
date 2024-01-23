@@ -280,10 +280,12 @@ static ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request,
         return UCS_PTR_STATUS(request);
     }
 
+    DOCA_LOG_INFO("ucp_worker_progress start");
     while (ctx->complete == 0) {
         if (quit_app) break;
         ucp_worker_progress(ucp_worker);
     }
+    DOCA_LOG_INFO("ucp_worker_progress end");
     status = ucp_request_check_status(request);
 
     ucp_request_free(request);
@@ -342,7 +344,7 @@ fill_request_param(ucp_dt_iov_t *iov, int is_client,
  */
 static int send_recv_stream(
     ucp_worker_h ucp_worker, ucp_ep_h ep, 
-    int is_receiver, void *buf, size_t buf_len)
+    int is_receiver, void *buf, size_t *buf_len)
 {
     ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     ucp_request_param_t param;
@@ -350,31 +352,34 @@ static int send_recv_stream(
     test_req_t ctx;
     int is_sender = !is_receiver;
 
+    DOCA_LOG_INFO("send_recv_stream");
+    DOCA_LOG_INFO("-buf: %s", (char *) buf);
+    DOCA_LOG_INFO("-buf_len: %zd", *buf_len);
 
     /* Allocate iov buffer for send/recv data */
     memset(iov, 0, iov_cnt * sizeof(*iov));
     iov[0].buffer = buf; // if this process is sender, buf has data to send.
-    iov[0].length = buf_len;
+    iov[0].length = *buf_len;
 
     /* Set send/recv shared params */
     ctx.complete       = 0;
     param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
                           UCP_OP_ATTR_FIELD_DATATYPE |
                           UCP_OP_ATTR_FIELD_USER_DATA;
-    param.datatype     = UCP_DATATYPE_IOV;
+    param.datatype     = ucp_dt_make_contig(1);
     param.user_data    = &ctx;
 
 
     if (is_sender) {
         /* Client sends a message to the server using the stream API */
         param.cb.send = send_cb;
-        request       = ucp_stream_send_nbx(ep, iov, iov_cnt, &param);
+        request       = ucp_stream_send_nbx(ep, buf, *buf_len, &param);
     } else {
         /* Server receives a message from the client using the stream API */
         param.op_attr_mask  |= UCP_OP_ATTR_FIELD_FLAGS;
         param.flags          = UCP_STREAM_RECV_FLAG_WAITALL;
         param.cb.recv_stream = stream_recv_cb;
-        request              = ucp_stream_recv_nbx(ep, iov, iov_cnt, NULL, &param);
+        request              = ucp_stream_recv_nbx(ep, buf, *buf_len, buf_len, &param);
     }
 
     return request_finalize(ucp_worker, request, &ctx, is_receiver, iov);
@@ -385,7 +390,8 @@ static int send_recv_stream(
  * The client sends a message to the server and waits until the send it completed.
  * The server receives a message from the client and waits for its completion.
  */
-static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_receiver)
+static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, 
+    int is_receiver, void *buf, size_t *buf_len)
 {
     ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     ucp_request_param_t param;
@@ -393,15 +399,16 @@ static int send_recv_tag(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_receiver)
     size_t msg_length;
     void *msg;
     test_req_t ctx;
+    int is_sender = !is_receiver;
 
+    /* Allocate iov buffer for send/recv data */
     memset(iov, 0, iov_cnt * sizeof(*iov));
+    iov[0].buffer = buf; // if this process is sender, buf has data to send.
+    iov[0].length = *buf_len;
+    msg = iov[0].buffer;
+    msg_length = *buf_len;
 
-    if (fill_request_param(iov, !is_receiver, &msg, &msg_length,
-                           &ctx, &param) != 0) {
-        return -1;
-    }
-
-    if (!is_receiver) {
+    if (is_sender) {
         /* Client sends a message to the server using the Tag-Matching API */
         param.cb.send = send_cb;
         request       = ucp_tag_send_nbx(ep, msg, msg_length, TAG, &param);
@@ -518,92 +525,6 @@ static int send_recv_am(ucp_worker_h ucp_worker, ucp_ep_h ep, int is_receiver)
     return request_finalize(ucp_worker, request, &ctx, is_receiver, iov);
 }
 
-/**
- * Print this application's usage help message.
- */
-static void usage()
-{
-    fprintf(stderr, "Usage: compress_proxy [parameters]\n");
-    fprintf(stderr, "UCP client-server utility\n");
-    fprintf(stderr, "\nParameters are:\n");
-    fprintf(stderr, "  -a Set IP address of the server "
-                    "(required for client and should not be specified "
-                    "for the server)\n");
-    print_common_help();
-    fprintf(stderr, "\n");
-}
-
-/**
- * Parse the command line arguments.
- */
-// static int parse_cmd(int argc, char *const argv[], char **server_addr,
-//                      char **listen_addr, send_recv_type_t *send_recv_type)
-// {
-//     int c = 0;
-//     int port;
-
-//     while ((c = getopt(argc, argv, "a:l:p:c:i:s:v:m:h")) != -1) {
-//         switch (c) {
-//         case 'a':
-//             *server_addr = optarg;
-//             break;
-//         case 'c':
-//             if (!strcasecmp(optarg, "stream")) {
-//                 *send_recv_type = CLIENT_SERVER_SEND_RECV_STREAM;
-//             } else if (!strcasecmp(optarg, "tag")) {
-//                 *send_recv_type = CLIENT_SERVER_SEND_RECV_TAG;
-//             } else if (!strcasecmp(optarg, "am")) {
-//                 *send_recv_type = CLIENT_SERVER_SEND_RECV_AM;
-//             } else {
-//                 fprintf(stderr, "Wrong communication type %s. "
-//                         "Using %s as default\n", optarg, COMM_TYPE_DEFAULT);
-//                 *send_recv_type = CLIENT_SERVER_SEND_RECV_DEFAULT;
-//             }
-//             break;
-//         case 'l':
-//             *listen_addr = optarg;
-//             break;
-//         case 'p':
-//             port = atoi(optarg);
-//             if ((port < 0) || (port > UINT16_MAX)) {
-//                 fprintf(stderr, "Wrong server port number %d\n", port);
-//                 return -1;
-//             }
-//             server_port = port;
-//             break;
-//         case 'i':
-//             num_iterations = atoi(optarg);
-//             break;
-//         case 's':
-//             test_string_length = atol(optarg);
-//             if (test_string_length < 0) {
-//                 fprintf(stderr, "Wrong string size %ld\n", test_string_length);
-//                 return UCS_ERR_UNSUPPORTED;
-//             }
-//             break;
-//         case 'v':
-//             iov_cnt = atol(optarg);
-//             if (iov_cnt <= 0) {
-//                 fprintf(stderr, "Wrong iov count %ld\n", iov_cnt);
-//                 return UCS_ERR_UNSUPPORTED;
-//             }
-//             break;
-//         case 'm':
-//             test_mem_type = parse_mem_type(optarg);
-//             if (test_mem_type == UCS_MEMORY_TYPE_LAST) {
-//                 return UCS_ERR_UNSUPPORTED;
-//             }
-//             break;
-//         case 'h':
-//         default:
-//             usage();
-//             return -1;
-//         }
-//     }
-
-//     return 0;
-// }
-
 static char* sockaddr_get_ip_str(const struct sockaddr_storage *sock_addr,
                                  char *ip_str, size_t max_size)
 {
@@ -636,7 +557,7 @@ static char* sockaddr_get_port_str(const struct sockaddr_storage *sock_addr,
 
 static int client_server_send_recv(ucp_worker_h worker, ucp_ep_h ep,
                                        send_recv_type_t send_recv_type,
-                                       int is_receiver, void *buf, size_t buf_len)
+                                       int is_receiver, void *buf, size_t *buf_len)
 {
     int ret;
 
@@ -647,7 +568,7 @@ static int client_server_send_recv(ucp_worker_h worker, ucp_ep_h ep,
         break;
     case CLIENT_SERVER_SEND_RECV_TAG:
         /* Client-Server communication via Tag-Matching API */
-        ret = send_recv_tag(worker, ep, is_receiver);
+        ret = send_recv_tag(worker, ep, is_receiver, buf, buf_len);
         break;
     case CLIENT_SERVER_SEND_RECV_AM:
         /* Client-Server communication via AM API. */
@@ -798,6 +719,76 @@ out:
     return status;
 }
 
+static int proxy_progress(ucp_worker_h ucp_worker,
+                    ucp_ep_h ucp_ep,
+                    send_recv_type_t send_recv_type, 
+                    struct cpxy_cc_objects *cc_objects) {
+    doca_error_t result;
+    int ret = 0;
+
+    // Receive buffer for data from Comm Channel
+    struct mpi_dpuo_message msg_from_host;
+    size_t msg_from_host_len = sizeof(struct mpi_dpuo_message);
+    memset(&msg_from_host, 0, msg_from_host_len);
+
+    DOCA_LOG_INFO("CC_Recv waiting...");
+
+    while ((result = doca_comm_channel_ep_recvfrom(cc_objects->cc_ep, &msg_from_host, &msg_from_host_len, DOCA_CC_MSG_FLAG_NONE,
+                            &cc_objects->cc_peer_addr)) == DOCA_ERROR_AGAIN) {
+        if (quit_app) {
+            result = DOCA_ERROR_UNEXPECTED;
+            return ret;
+        }
+        usleep(1);
+        msg_from_host_len = sizeof(struct mpi_dpuo_message);
+    }
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Message was not received: %s", doca_error_get_descr(result));
+        return ret;
+    }
+    DOCA_LOG_INFO("Received message from host through CC type: %d", msg_from_host.type);
+    DOCA_LOG_INFO("Received message from host through CC buffer: '%s'", msg_from_host.buffer);
+    DOCA_LOG_INFO("Received message from host through CC buffer_len: '%zd'", msg_from_host.buffer_len);
+    DOCA_LOG_INFO("\n%s", hex_dump(&msg_from_host, msg_from_host_len));
+
+    /* UCP_Send/Recv */
+    DOCA_LOG_INFO("DATA/%s/%s", mpi_dpuo_message_type_string(msg_from_host.type), cpxy_sendrecv_type_string(send_recv_type));
+    if (msg_from_host.type == MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST) {
+        /* This process is sender */
+        ret = client_server_send_recv(ucp_worker, ucp_ep, send_recv_type, false, msg_from_host.buffer, &msg_from_host.buffer_len);
+        if (ret != 0) {
+            return ret;
+        }
+    } else if (msg_from_host.type == MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST) {
+        // This process is receiver, should sends data to Host through CC.
+        struct mpi_dpuo_message msg;
+        size_t msg_len = sizeof(struct mpi_dpuo_message);
+        memset(&msg, 0, msg_len);
+        size_t buf_len = msg_from_host.buffer_len;
+
+        DOCA_LOG_INFO("UCP_Recv start");
+        ret = client_server_send_recv(ucp_worker, ucp_ep, send_recv_type, true, msg.buffer, &buf_len);
+        if (ret != 0) {
+            return ret;
+        }
+
+        msg.type = MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE;
+        msg.buffer_len = buf_len;
+
+        DOCA_LOG_INFO("CC_Send to host start");
+        result = doca_comm_channel_ep_sendto(cc_objects->cc_ep, &msg, msg_len, DOCA_CC_MSG_FLAG_NONE, cc_objects->cc_peer_addr);
+        if (result != DOCA_SUCCESS) {
+            DOCA_LOG_ERR("Message was not received: %s", doca_error_get_descr(result));
+            return ret;
+        }
+        DOCA_LOG_INFO("CC_Send to host finished");
+    } else {
+        DOCA_LOG_ERR("Unknown mpi_dpuo_message_type_t %d", msg_from_host.type);
+    }
+
+    return ret;
+}
+
 
 static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
                       char *listen_addr, send_recv_type_t send_recv_type,
@@ -808,7 +799,6 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
     ucp_ep_h         server_ep;
     ucs_status_t     status;
     int              ret;
-	doca_error_t result;
 
 
     DOCA_LOG_INFO("run_server start");
@@ -858,71 +848,19 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
         }
 
         char hello_msg[5] = "";
+        size_t hello_msg_len = 5;
         DOCA_LOG_INFO("Waiting for Hello Message");
-        ret = client_server_send_recv(ucp_data_worker, server_ep, send_recv_type, 1, hello_msg, 5);
+        ret = client_server_send_recv(ucp_data_worker, server_ep, send_recv_type, 1, hello_msg, &hello_msg_len);
         if (ret != 0) {
             goto err_ep;
         }
         DOCA_LOG_INFO("Hello Message received");
 
-        // Receive buffer for data from Comm Channel
-        struct mpi_dpuo_message msg_from_host;
-        size_t msg_from_host_len = sizeof(struct mpi_dpuo_message);
-        memset(&msg_from_host, 0, msg_from_host_len);
-
         while(!quit_app) {
-            DOCA_LOG_INFO("CC_Recv waiting...");
-            while ((result = doca_comm_channel_ep_recvfrom(cc_objects->cc_ep, &msg_from_host, &msg_from_host_len, DOCA_CC_MSG_FLAG_NONE,
-                                    &cc_objects->cc_peer_addr)) == DOCA_ERROR_AGAIN) {
-                if (quit_app) {
-                    result = DOCA_ERROR_UNEXPECTED;
-                    goto err_ep;
-                }
-                usleep(1);
-                msg_from_host_len = sizeof(struct mpi_dpuo_message);
-            }
-            if (result != DOCA_SUCCESS) {
-                DOCA_LOG_ERR("Message was not received: %s", doca_error_get_descr(result));
-                goto err_ep;
-	        }
-        	DOCA_LOG_INFO("Received message from host through CC type: %d", msg_from_host.type);
-        	DOCA_LOG_INFO("Received message from host through CC buffer: '%s'", msg_from_host.buffer);
-        	DOCA_LOG_INFO("Received message from host through CC bufferlen: '%zd'", msg_from_host.buffer_len);
-
-            /* UCP_Send/Recv */
-            DOCA_LOG_INFO("DATA/%s/%d", mpi_dpuo_message_type_string(msg_from_host.type), msg_from_host.type);
-            if (msg_from_host.type == MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST) {
-                /* This process is sender */
-                
-                ret = client_server_send_recv(ucp_data_worker, server_ep, send_recv_type, 0, msg_from_host.buffer, msg_from_host.buffer_len);
-                if (ret != 0) {
-                    goto err_ep;
-                }
-            } else if (msg_from_host.type == MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST) {
-                // This process is receiver, should sends data to Host through CC.
-                struct mpi_dpuo_message msg;
-                size_t msg_len = sizeof(struct mpi_dpuo_message);
-                memset(&msg, 0, msg_len);
-
-                ret = client_server_send_recv(ucp_data_worker, server_ep, send_recv_type, 1, msg.buffer, msg_from_host.buffer_len);
-                if (ret != 0) {
-                    goto err_ep;
-                }
-
-                result = doca_comm_channel_ep_sendto(cc_objects->cc_ep, &msg, msg_len, DOCA_CC_MSG_FLAG_NONE, cc_objects->cc_peer_addr);
-                if (result != DOCA_SUCCESS) {
-                    DOCA_LOG_ERR("Message was not received: %s", doca_error_get_descr(result));
-                    goto err_ep;
-                }
-            } else {
-                DOCA_LOG_ERR("Unknown mpi_dpuo_message_type_t %d", msg_from_host.type);
-            }
-
-
+            /* main loop */
+            ret = proxy_progress(ucp_worker, server_ep, send_recv_type, cc_objects);
+            if (ret != 0) goto err_ep;
         }
-        if (result != DOCA_SUCCESS)
-    		DOCA_LOG_WARN("Response was not sent successfully: %s", doca_error_get_descr(result));
-
 
         /* Close the endpoint to the client */
         ep_close(ucp_data_worker, server_ep, UCP_EP_CLOSE_FLAG_FORCE);
@@ -948,7 +886,6 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
     ucp_ep_h     client_ep;
     ucs_status_t status;
     int          ret;
-    doca_error_t result;
     DOCA_LOG_INFO("run_client start");
 
 
@@ -960,8 +897,9 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
     }
 
     char hello_msg[5] = "HELLO";
+    size_t hello_msg_len = strlen(hello_msg);
     DOCA_LOG_INFO("Hello Message Sent");
-    ret = client_server_send_recv(ucp_worker, client_ep, send_recv_type, 0, hello_msg, strlen(hello_msg));
+    ret = client_server_send_recv(ucp_worker, client_ep, send_recv_type, 0, hello_msg, &hello_msg_len);
     if (ret != 0) {
         goto err_ep;
     }
@@ -972,57 +910,9 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
     memset(&msg_from_host, 0, msg_from_host_len);
 
     while(!quit_app) {
-        DOCA_LOG_INFO("CC_Recv waiting...");
-        while ((result = doca_comm_channel_ep_recvfrom(cc_objects->cc_ep, &msg_from_host, &msg_from_host_len, DOCA_CC_MSG_FLAG_NONE,
-                                &cc_objects->cc_peer_addr)) == DOCA_ERROR_AGAIN) {
-            if (quit_app) {
-                result = DOCA_ERROR_UNEXPECTED;
-                goto err_ep;
-            }
-            usleep(1);
-            msg_from_host_len = sizeof(struct mpi_dpuo_message);
-        }
-        if (result != DOCA_SUCCESS) {
-            DOCA_LOG_ERR("Message was not received: %s", doca_error_get_descr(result));
-            goto err_ep;
-        }
-        DOCA_LOG_INFO("Received message from host through CC type: %d", msg_from_host.type);
-        DOCA_LOG_INFO("Received message from host through CC buffer: '%s'", msg_from_host.buffer);
-        DOCA_LOG_INFO("Received message from host through CC bufferlen: '%zd'", msg_from_host.buffer_len);
-        DOCA_LOG_INFO("\n%s", hex_dump(&msg_from_host, msg_from_host_len));
-
-        /* UCP_Send/Recv */
-        DOCA_LOG_INFO("DATA/%s/%d", mpi_dpuo_message_type_string(msg_from_host.type), msg_from_host.type);
-        if (msg_from_host.type == MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST) {
-            /* This process is sender */
-            ret = client_server_send_recv(ucp_worker, client_ep, send_recv_type, 0, msg_from_host.buffer, msg_from_host.buffer_len);
-            if (ret != 0) {
-                goto err_ep;
-            }
-        } else if (msg_from_host.type == MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST) {
-            // This process is receiver, should sends data to Host through CC.
-            struct mpi_dpuo_message msg;
-            size_t msg_len = sizeof(struct mpi_dpuo_message);
-            memset(&msg, 0, msg_len);
-
-            DOCA_LOG_INFO("UCP_Recv start");
-            ret = client_server_send_recv(ucp_worker, client_ep, send_recv_type, 1, msg.buffer, msg_from_host.buffer_len);
-            if (ret != 0) {
-                goto err_ep;
-            }
-            DOCA_LOG_INFO("UCP_Recv finished");
-            DOCA_LOG_INFO("UCP_Recv: %s", msg.buffer);
-
-            DOCA_LOG_INFO("CC_Send to host start");
-            result = doca_comm_channel_ep_sendto(cc_objects->cc_ep, &msg, msg_len, DOCA_CC_MSG_FLAG_NONE, cc_objects->cc_peer_addr);
-            if (result != DOCA_SUCCESS) {
-                DOCA_LOG_ERR("Message was not received: %s", doca_error_get_descr(result));
-                goto err_ep;
-            }
-            DOCA_LOG_INFO("CC_Send to host finished");
-        } else {
-            DOCA_LOG_ERR("Unknown mpi_dpuo_message_type_t %d", msg_from_host.type);
-        }
+        /* main loop */
+        ret = proxy_progress(ucp_worker, client_ep, send_recv_type, cc_objects);
+        if (ret != 0) goto err_ep;
     }
 
 err_ep:

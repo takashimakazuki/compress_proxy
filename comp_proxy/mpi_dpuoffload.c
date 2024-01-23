@@ -231,8 +231,7 @@ create_comm_channel_start(const char *server_name, const struct mpi_dpuo_config 
 	DOCA_LOG_INFO("Connection to server was established successfully");
 
 	/* Test Message */
-	char text[25] = "ABCD_EFGH_";
-	size_t text_len = strlen(text);
+	size_t text_len = strlen(dpuo_config->text);
 
 	if (dpuo_config->is_sender) {
 		/* Sender */
@@ -241,11 +240,12 @@ create_comm_channel_start(const char *server_name, const struct mpi_dpuo_config 
 		/* Fill cc message that is sent to DPU */
 		memset(&msg, 0, sizeof(struct mpi_dpuo_message));
 		msg.type = MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST;
-		strncpy(msg.buffer, text, text_len);
+		strncpy(msg.buffer, dpuo_config->text, text_len);
 		msg.buffer_len = strlen(msg.buffer);
-		DOCA_LOG_INFO("Message sent type: %d", msg.type);
-		DOCA_LOG_INFO("Message sent buffer: %s", msg.buffer);
-		DOCA_LOG_INFO("Message sent bufferlen %zd", msg.buffer_len);
+		DOCA_LOG_INFO("Message sent to DPU");
+		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(msg.type));
+		DOCA_LOG_INFO("-buffer: %s", msg.buffer);
+		DOCA_LOG_INFO("-buffer_len %zd", msg.buffer_len);
 		DOCA_LOG_INFO("\n%s", hex_dump(&msg, sizeof(struct mpi_dpuo_message)));
 
 
@@ -267,14 +267,15 @@ create_comm_channel_start(const char *server_name, const struct mpi_dpuo_config 
 		/* Fill cc message that is sent to DPU */
 		msg.type = MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST;
 		msg.buffer_len = text_len;
-		DOCA_LOG_INFO("Message sent type: %d", msg.type);
+		DOCA_LOG_INFO("Message sent to DPU");
+		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg.type));
+		DOCA_LOG_INFO("-buffer_len %zd", msg.buffer_len);
 		
 		result = doca_comm_channel_ep_sendto(ep, &msg, (size_t)sizeof(struct mpi_dpuo_message), DOCA_CC_MSG_FLAG_NONE, peer_addr);
 		if (result != DOCA_SUCCESS) {
 			DOCA_LOG_ERR("cc send failed: %s", doca_error_get_descr(result));
 			goto destroy_cc;
 		}
-		DOCA_LOG_INFO("MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST sent: %d", msg.type);
 		
 		while ((result = doca_comm_channel_ep_recvfrom(ep, &recv_msg, &recv_msg_len, DOCA_CC_MSG_FLAG_NONE, 
 					&peer_addr)) == DOCA_ERROR_AGAIN) {
@@ -290,10 +291,11 @@ create_comm_channel_start(const char *server_name, const struct mpi_dpuo_config 
 			goto destroy_cc;
 		}
 
-		DOCA_LOG_INFO("Message received type: %d", recv_msg.type);
-		DOCA_LOG_INFO("Message received buffer: %s", recv_msg.buffer);
-		DOCA_LOG_INFO("Message received buffer_len: %zd", recv_msg.buffer_len);
-		DOCA_LOG_INFO("Message received total len: %ld", recv_msg_len);
+		DOCA_LOG_INFO("Message received from DPU");
+		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg.type));
+		DOCA_LOG_INFO("-buffer: %s", recv_msg.buffer);
+		DOCA_LOG_INFO("-buffer_len: %zd", recv_msg.buffer_len);
+		DOCA_LOG_INFO("-total length: %ld", recv_msg_len);
 	}
 	
 

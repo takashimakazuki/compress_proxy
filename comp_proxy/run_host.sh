@@ -18,14 +18,14 @@ else
     echo "Hostname $HOSTNAME is unkown"
 fi
 
-
+TEXT=ABCDEABCDEABCDE
 case $1 in
     "s")
-        ./buildx86/mpi_dpuoffload --pci-addr $PCI_ADDR --is-sender
+        ./buildx86/mpi_dpuoffload --pci-addr $PCI_ADDR --is-sender --text $TEXT
         ;;
 
     "r")
-        ./buildx86/mpi_dpuoffload --pci-addr $PCI_ADDR
+        ./buildx86/mpi_dpuoffload --pci-addr $PCI_ADDR --text $TEXT
         ;;
 
     *)

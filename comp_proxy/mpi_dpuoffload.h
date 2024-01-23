@@ -5,7 +5,7 @@
 #include <doca_error.h>
 #include <stdbool.h>
 
-#define MAX_USER_TXT_SIZE 128					/* Maximum size of user input text */
+#define MAX_USER_TXT_SIZE 4000					/* Maximum size of user input text */
 #define MAX_TXT_SIZE (MAX_USER_TXT_SIZE + 1)			/* Maximum size of input text */
 #define USER_PCI_ADDR_LEN 7					/* User PCI address string length */
 #define PCI_ADDR_LEN (USER_PCI_ADDR_LEN + 1)			/* PCI address string length */
