@@ -43,17 +43,6 @@ typedef struct test_req {
 } test_req_t;
 
 
-/**
- * Descriptor of the data received with AM API.
- */
-static struct {
-    volatile int complete;
-    int          is_rndv;
-    void         *desc;
-    void         *recv_buf;
-} am_data_desc = {0, 0, NULL, NULL};
-
-
 /* Comm Channel config data */
 #define USER_PCI_ADDR_LEN 7					/* User PCI address string length */
 #define PCI_ADDR_LEN (USER_PCI_ADDR_LEN + 1)			/* PCI address string length */

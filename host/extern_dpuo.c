@@ -63,7 +63,7 @@ create_comm_channel(const char *server_name, const struct mpi_dpuo_config *dpuo_
 		goto destroy_cc;
 	}
 
-	result = doca_comm_channel_ep_set_max_msg_size(cc_objects->cc_ep, MAX_MSG_SIZE);
+	result = doca_comm_channel_ep_set_max_msg_size(cc_objects->cc_ep, sizeof(struct mpi_dpuo_message));
 	if (result != DOCA_SUCCESS) {
 		DOCA_LOG_ERR("Failed to set max_msg_size property");
 		goto destroy_cc;
@@ -94,7 +94,6 @@ create_comm_channel(const char *server_name, const struct mpi_dpuo_config *dpuo_
 			result = DOCA_ERROR_UNEXPECTED;
 			break;
 		}
-		usleep(1);
 	}
 	if (result != DOCA_SUCCESS) {
 		DOCA_LOG_ERR("Failed to validate the connection with the DPU: %s", doca_error_get_descr(result));
@@ -164,13 +163,13 @@ doca_error_t start_comm_channel_sendrecv(void* buffer, size_t data_len, bool is_
 			return result;
 		}
 		
+		/* Waiting for message from DPU daemon(compress_proxy)*/
 		while ((result = doca_comm_channel_ep_recvfrom(cc_objects->cc_ep, &recv_msg, &recv_msg_len, DOCA_CC_MSG_FLAG_NONE, 
 					&cc_objects->cc_peer_addr)) == DOCA_ERROR_AGAIN) {
 			if (quit_app) {
 				result = DOCA_ERROR_UNEXPECTED;
 				break;
 			}
-			usleep(1);
 			recv_msg_len = sizeof(struct mpi_dpuo_message);
 		}
 		if (result != DOCA_SUCCESS) {
@@ -248,31 +247,37 @@ int MPI_Finalize() {
 	/* Destroy Comm Channel DOCA device */
 	doca_dev_close(cc_objects.cc_dev);
 
-  ret = PMPI_Finalize();
-  return ret;
+	if (result != DOCA_SUCCESS) {
+		return result;
+	}
+
+	ret = PMPI_Finalize();
+	return ret;
 }
 
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
   // Send data buffer to compress_proxy(dpu daemon) and wait for completion
+  doca_error_t result;
   int total_len, dtype_len;
   
   MPI_Type_size(datatype, &dtype_len);
   total_len = dtype_len * count;
 
-  start_comm_channel_sendrecv((void *)buf, total_len, true, &cfg, &cc_objects);
-  return 0;
+  result = start_comm_channel_sendrecv((void *)buf, total_len, true, &cfg, &cc_objects);
+  return result;
 }
 
 int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)
 {
   // Wait for writeback request from compress_proxy(dpu daemon). 
   // Polling until request is received.
+  doca_error_t result;
   int total_len, dtype_len;
 
   MPI_Type_size(datatype, &dtype_len);
   total_len = dtype_len * count;
 
-  start_comm_channel_sendrecv((void *)buf, total_len, false, &cfg, &cc_objects);
-  return MPI_SUCCESS;
+  result = start_comm_channel_sendrecv((void *)buf, total_len, false, &cfg, &cc_objects);
+  return result;
 }
