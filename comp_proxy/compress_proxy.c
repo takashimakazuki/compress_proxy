@@ -232,13 +232,13 @@ static ucs_status_t start_client(ucp_worker_h ucp_worker,
 
 static void print_iov(const ucp_dt_iov_t *iov)
 {
-    char *msg = alloca(test_string_length);
     size_t idx;
 
     for (idx = 0; idx < iov_cnt; idx++) {
+        char *msg = alloca(iov[idx].length);
         /* In case of Non-System memory */
-        mem_type_memcpy(msg, iov[idx].buffer, test_string_length);
-        printf("%s.\n", msg);
+        mem_type_memcpy(msg, iov[idx].buffer, iov[idx].length);
+        printf("%.*s.\n", (int)iov[idx].length, msg);
     }
 }
 
@@ -303,11 +303,10 @@ static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
     if (status != UCS_OK) {
         fprintf(stderr, "unable to %s UCX message (%s)\n",
                 is_receiver ? "receive": "send", ucs_status_string(status));
-        ret = -1;
-        return ret;
+        return -1;
     }
 
-    print_result(is_receiver, iov);
+    // print_result(is_receiver, iov);
     return ret;
 }
 
@@ -352,14 +351,15 @@ static int send_recv_stream(
     test_req_t ctx;
     int is_sender = !is_receiver;
 
-    DOCA_LOG_INFO("send_recv_stream");
-    DOCA_LOG_INFO("-buf: %s", (char *) buf);
-    DOCA_LOG_INFO("-buf_len: %zd", *buf_len);
 
     /* Allocate iov buffer for send/recv data */
     memset(iov, 0, iov_cnt * sizeof(*iov));
     iov[0].buffer = buf; // if this process is sender, buf has data to send.
     iov[0].length = *buf_len;
+
+    DOCA_LOG_INFO("send_recv_stream");
+    DOCA_LOG_INFO("-iov[0]->buffer: '%.*s'(~40chars)", 40, (char *) iov[0].buffer);
+    DOCA_LOG_INFO("-iov[0]->length: %zd", iov[0].length);
 
     /* Set send/recv shared params */
     ctx.complete       = 0;
@@ -755,12 +755,13 @@ static int proxy_progress(ucp_worker_h ucp_worker,
     DOCA_LOG_INFO("DATA/%s/%s", mpi_dpuo_message_type_string(msg_from_host.type), cpxy_sendrecv_type_string(send_recv_type));
     if (msg_from_host.type == MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST) {
         /* This process is sender */
+        DOCA_LOG_INFO("UCP_Send start");
         ret = client_server_send_recv(ucp_worker, ucp_ep, send_recv_type, false, msg_from_host.buffer, &msg_from_host.buffer_len);
         if (ret != 0) {
             return ret;
         }
     } else if (msg_from_host.type == MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST) {
-        // This process is receiver, should sends data to Host through CC.
+        /* This process is receiver, should sends data to Host through CC. */
         struct mpi_dpuo_message msg;
         size_t msg_len = sizeof(struct mpi_dpuo_message);
         memset(&msg, 0, msg_len);
@@ -858,7 +859,7 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
 
         while(!quit_app) {
             /* main loop */
-            ret = proxy_progress(ucp_worker, server_ep, send_recv_type, cc_objects);
+            ret = proxy_progress(ucp_data_worker, server_ep, send_recv_type, cc_objects);
             if (ret != 0) goto err_ep;
         }
 
@@ -897,7 +898,7 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
     }
 
     char hello_msg[5] = "HELLO";
-    size_t hello_msg_len = strlen(hello_msg);
+    size_t hello_msg_len = 5;
     DOCA_LOG_INFO("Hello Message Sent");
     ret = client_server_send_recv(ucp_worker, client_ep, send_recv_type, 0, hello_msg, &hello_msg_len);
     if (ret != 0) {
@@ -1070,7 +1071,7 @@ destroy_cc:
 
 
 /*
- * ARGP Callback - Handle Comm Channel DOCA device PCI address paramet|er
+ * ARGP Callback - Handle Comm Channel DOCA device PCI address parameter
  *
  * @param [in]: Input parameter
  * @config [in/out]: Program configuration context
