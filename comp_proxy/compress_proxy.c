@@ -42,7 +42,7 @@
 #define PRINT_INTERVAL         2000
 #define TEST_AM_ID             0
 
-#define DEBUG_TIMER_ENABLED    true
+// #define DEBUG_TIMER_ENABLED    true
 
 #define GET_TIME(_timespec_val) {\
     clock_gettime(CLOCK_MONOTONIC, &(_timespec_val));\
@@ -54,7 +54,6 @@
 
 DOCA_LOG_REGISTER(COMPRESS_PROXY);
 
-static size_t iov_cnt            = 1;
 static uint16_t server_port    = DEFAULT_PORT;
 static sa_family_t ai_family   = AF_INET;
 static int connection_closed   = 1;
@@ -184,37 +183,7 @@ static ucs_status_t start_client(ucp_worker_h ucp_worker,
     return status;
 }
 
-/**
- * Progress the request until it completes.
- */
-static ucs_status_t request_wait(ucp_worker_h ucp_worker, void *request,
-                                 test_req_t *ctx)
-{
-    ucs_status_t status;
-
-    /* if operation was completed immediately */
-    if (request == NULL) {
-        return UCS_OK;
-    }
-
-    if (UCS_PTR_IS_ERR(request)) {
-        return UCS_PTR_STATUS(request);
-    }
-
-    DOCA_LOG_INFO("ucp_worker_progress start");
-    while (ctx->complete == 0) {
-        // if (quit_app) break;
-        ucp_worker_progress(ucp_worker);
-    }
-    DOCA_LOG_INFO("ucp_worker_progress end");
-    status = ucp_request_check_status(request);
-
-    ucp_request_free(request);
-
-    return status;
-}
-
-static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
+static inline int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
                             test_req_t *ctx, int is_receiver, ucp_dt_iov_t *iov)
 {
     int ret = 0;
@@ -224,15 +193,34 @@ static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
     struct timespec tstart, tend;
     GET_TIME(tstart);
 #endif
-    status = request_wait(ucp_worker, request, ctx);
+
+    if (request == NULL) {
+        status = UCS_OK;
+        goto check_request_status;
+    }
+    if (UCS_PTR_IS_ERR(request)) {
+        status = UCS_PTR_STATUS(request);
+        goto check_request_status;
+    }
+
+    /* Progress the request until it completes. */
+    while (ctx->complete == 0) {
+        if (quit_app) break;
+        ucp_worker_progress(ucp_worker);
+    }
+    status = ucp_request_check_status(request);
+    ucp_request_free(request);
+
+check_request_status:
     if (status != UCS_OK) {
         fprintf(stderr, "unable to %s UCX message (%s)\n",
                 is_receiver ? "receive": "send", ucs_status_string(status));
         return -1;
     }
+
 #ifdef DEBUG_TIMER_ENABLED
     GET_TIME(tend);
-    printf("request_wait: ");
+    printf("request_finalize: ");
     PRINT_TIME(tstart, tend);
 #endif
     // print_result(is_receiver, iov);
@@ -244,25 +232,15 @@ static int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
  * The client sends a message to the server and waits until the send it completed.
  * The server receives a message from the client and waits for its completion.
  */
-static int send_recv_stream(
+static inline int send_recv_stream(
     ucp_worker_h ucp_worker, ucp_ep_h ep, 
     int is_receiver, void *buf, size_t *buf_len)
 {
-    ucp_dt_iov_t *iov = alloca(iov_cnt * sizeof(ucp_dt_iov_t));
     ucp_request_param_t param;
     test_req_t *request;
     test_req_t ctx;
     int is_sender = !is_receiver;
 
-
-    /* Allocate iov buffer for send/recv data */
-    memset(iov, 0, iov_cnt * sizeof(*iov));
-    iov[0].buffer = buf; // if this process is sender, buf has data to send.
-    iov[0].length = *buf_len;
-
-    DOCA_LOG_INFO("send_recv_stream");
-    DOCA_LOG_INFO("-iov[0]->buffer: '%.*s'(~40chars)", 40, (char *) iov[0].buffer);
-    DOCA_LOG_INFO("-iov[0]->length: %zd", iov[0].length);
 
     /* Set send/recv shared params */
     ctx.complete       = 0;
@@ -285,7 +263,7 @@ static int send_recv_stream(
         request              = ucp_stream_recv_nbx(ep, buf, *buf_len, buf_len, &param);
     }
 
-    return request_finalize(ucp_worker, request, &ctx, is_receiver, iov);
+    return request_finalize(ucp_worker, request, &ctx, is_receiver, NULL);
 }
 
 static char* sockaddr_get_ip_str(const struct sockaddr_storage *sock_addr,

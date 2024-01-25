@@ -5,7 +5,7 @@ project('COMPRESS-PROXY', 'C', 'CPP',
 	version: run_command(find_program('cat', 'more'),
 		files('VERSION'), check: true).stdout().strip(),
 	license: 'BSD',
-	default_options: ['buildtype=debug',
+	default_options: ['buildtype=release',
 			  'default_library=static'],
 	meson_version: '>= 0.47.1'
 )
