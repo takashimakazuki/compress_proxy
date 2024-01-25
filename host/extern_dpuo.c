@@ -17,12 +17,13 @@
 
 DOCA_LOG_REGISTER(MPI_DPUO_LIB);
 
-static struct mpi_dpuo_cc_objects cc_objects;
-static struct mpi_dpuo_config cfg;
+struct mpi_dpuo_cc_objects cc_objects;
+struct mpi_dpuo_config cfg;
 
-static bool quit_app;		/* Shared variable to allow for a proper shutdown */
 
-static void signal_handler(int signum)
+bool quit_app;		/* Shared variable to allow for a proper shutdown */
+
+void signal_handler(int signum)
 {
 	if (signum == SIGINT || signum == SIGTERM) {
 		DOCA_LOG_INFO("Signal %d received, preparing to exit", signum);
@@ -100,7 +101,7 @@ create_comm_channel(const char *server_name, const struct mpi_dpuo_config *dpuo_
 		return result;
 	}
 
-	DOCA_LOG_INFO("Connection to server was established successfully");	
+	DOCA_LOG_INFO("Connection to CC server was established successfully");	
   return result;
 
 destroy_cc:
@@ -130,11 +131,11 @@ doca_error_t start_comm_channel_sendrecv(void* buffer, size_t data_len, bool is_
 		memset(&msg, 0, sizeof(struct mpi_dpuo_message));
 		msg.type = MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST;
 		msg.buffer_len = data_len;
-    memcpy(msg.buffer, buffer, data_len);
-		DOCA_LOG_INFO("Message sent to DPU");
-		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(msg.type));
-		DOCA_LOG_INFO("-buffer: %s", msg.buffer);
-		DOCA_LOG_INFO("-buffer_len %zd", msg.buffer_len);
+    	memcpy(msg.buffer, buffer, data_len);
+		// DOCA_LOG_INFO("Message sent to DPU");
+		// DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(msg.type));
+		// DOCA_LOG_INFO("-buffer: %s", msg.buffer);
+		// DOCA_LOG_INFO("-buffer_len %zd", msg.buffer_len);
 
 
 		result = doca_comm_channel_ep_sendto(cc_objects->cc_ep, &msg, (size_t)sizeof(struct mpi_dpuo_message), DOCA_CC_MSG_FLAG_NONE, cc_objects->cc_peer_addr);
@@ -142,8 +143,6 @@ doca_error_t start_comm_channel_sendrecv(void* buffer, size_t data_len, bool is_
 			DOCA_LOG_ERR("Message was not sent: %s", doca_error_get_descr(result));
 			return result;
 		}
-		DOCA_LOG_INFO("MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST sent");
-
 	} else {
 		/* Receiver */
 		struct mpi_dpuo_message msg;
@@ -155,9 +154,9 @@ doca_error_t start_comm_channel_sendrecv(void* buffer, size_t data_len, bool is_
 		/* Fill cc message that is sent to DPU */
 		msg.type = MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST;
 		msg.buffer_len = data_len;
-		DOCA_LOG_INFO("Message sent to DPU");
-		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg.type));
-		DOCA_LOG_INFO("-buffer_len %zd", msg.buffer_len);
+		// DOCA_LOG_INFO("Message sent to DPU");
+		// DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg.type));
+		// DOCA_LOG_INFO("-buffer_len %zd", msg.buffer_len);
 		
 		result = doca_comm_channel_ep_sendto(cc_objects->cc_ep, &msg, (size_t)sizeof(struct mpi_dpuo_message), DOCA_CC_MSG_FLAG_NONE, cc_objects->cc_peer_addr);
 		if (result != DOCA_SUCCESS) {
@@ -179,14 +178,14 @@ doca_error_t start_comm_channel_sendrecv(void* buffer, size_t data_len, bool is_
 			return result;
 		}
 
-		DOCA_LOG_INFO("Message received from DPU");
-		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg.type));
-		DOCA_LOG_INFO("-buffer: %s", recv_msg.buffer);
-		DOCA_LOG_INFO("-buffer_len: %zd", recv_msg.buffer_len);
-		DOCA_LOG_INFO("-total length: %ld", recv_msg_len);
-    if (recv_msg.type == MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE) {
-      memcpy(buffer, recv_msg.buffer, recv_msg.buffer_len);
-    }
+		// DOCA_LOG_INFO("Message received from DPU");
+		// DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg.type));
+		// DOCA_LOG_INFO("-buffer: %s", recv_msg.buffer);
+		// DOCA_LOG_INFO("-buffer_len: %zd", recv_msg.buffer_len);
+		// DOCA_LOG_INFO("-total length: %ld", recv_msg_len);
+		if (recv_msg.type == MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE) {
+			memcpy(buffer, recv_msg.buffer, recv_msg.buffer_len);
+		}
 	}
   return result;
 }
@@ -199,14 +198,16 @@ void print_cpxy_config(struct mpi_dpuo_config *cfg)
 }
 
 
-int MPI_Comm_rank(MPI_Comm comm, int *rank)
+
+int MPI_Init(int *argc, char ***argv)
 {
     static int ret = 0;
     const char *server_name = "compress_proxy_cc";
     doca_error_t result;
+	struct doca_log_backend *log_backend;
 
-    printf("\n---MPI_Comm_rank (OVERLOADED)---\n");
-    ret = PMPI_Comm_rank(comm, rank);
+
+	ret = PMPI_Init(argc, argv);
 
     char hostname[1024];
     hostname[1023] = '\0';
@@ -221,20 +222,17 @@ int MPI_Comm_rank(MPI_Comm comm, int *rank)
     print_cpxy_config(&cfg);
 
     /* Create a logger backend that prints to the standard output */
-    result = doca_log_backend_create_standard();
+    result = doca_log_backend_create_with_file(stderr, &log_backend);
     if (result != DOCA_SUCCESS) {
+      DOCA_LOG_ERR("Failed to create doca_log backend on rank");
       return -1;
     }
 
     result = create_comm_channel(server_name, &cfg, &cc_objects);
     if (result != DOCA_SUCCESS) {
-      DOCA_LOG_ERR("Failed to create comm channel on rank %d", *rank);
+      DOCA_LOG_ERR("Failed to create comm channel");
       return -1;
     }
-
-
-    printf("+++MPI_Comm_rank (OVERLOADED) on rank=%d done!+++\n\n", *rank);
-
     return ret;
 }
 
@@ -276,5 +274,5 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
   total_len = dtype_len * count;
 
   start_comm_channel_sendrecv((void *)buf, total_len, false, &cfg, &cc_objects);
-  return 0;
+  return MPI_SUCCESS;
 }
