@@ -1,6 +1,7 @@
 
 #include "common.h"
 #include "mpi_dpuoffload.h"
+#include "comm_channel_util.h"
 
 #include <doca_argp.h>
 #include <doca_log.h>

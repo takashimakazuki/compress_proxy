@@ -48,9 +48,7 @@ sources = [
 	'common.c',
     'pack.c',
     'utils.c',
-    'common.h',
-    'compress_proxy.h',
-    'mpi_dpuoffload.h',
+    'comm_channel_util.c',
 ]
 
 inc_dir = include_directories(

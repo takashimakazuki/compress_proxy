@@ -20,20 +20,23 @@ int main(int argc, char **argv)
     }
 
 
-    char src_buf[8+1];
-    char dst_buf[8+1];
-    for(int iter=0; iter<10; iter++) {
+    int len = 10000;
+    char src_buf[len+1];
+    char dst_buf[len+1];
+    
+
+    for(int iter=0; iter<2; iter++) {
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0) {
-            strcpy(src_buf, "TEST_RK0\0");
-            MPI_Send(src_buf, 8, MPI_CHAR, 1, 0xbeef, MPI_COMM_WORLD);
+            memset(src_buf, 'A', len);
+            src_buf[len] = '\0';
+            MPI_Send(src_buf, len, MPI_CHAR, 1, 0xbeef, MPI_COMM_WORLD);
             printf("Iter%d, rank%d Send finished '%.8s'\n", iter, rank, src_buf);
 
             // MPI_Recv(dst_buf, 8, MPI_CHAR, 1, 0xbee, MPI_COMM_WORLD, NULL);
             // printf("rank%d Receive finished %s\n", rank, dst_buf);
         } else {
-            strcpy(src_buf, "TEST_RK1\0");
-            MPI_Recv(dst_buf, 8, MPI_CHAR, 0, 0xbeef, MPI_COMM_WORLD, NULL);
+            MPI_Recv(dst_buf, len, MPI_CHAR, 0, 0xbeef, MPI_COMM_WORLD, NULL);
             printf("Iter%d, rank%d Receive finished '%.8s'\n", iter, rank, dst_buf);
 
             // MPI_Send(src_buf, 8, MPI_CHAR, 0, 0xbee, MPI_COMM_WORLD);

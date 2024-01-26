@@ -1,5 +1,5 @@
 #include "common.h"
-#include "mpi_dpuoffload.h"
+#include "comm_channel_util.h"
 
 #include <doca_error.h>
 #include <doca_comm_channel.h>
@@ -118,72 +118,69 @@ destroy_cc:
 	return result;
 }
 
-doca_error_t start_comm_channel_sendrecv(void* buffer, size_t data_len, bool is_sender, struct mpi_dpuo_config *dpuo_config, struct mpi_dpuo_cc_objects *cc_objects) {
-  /* Test Message */
-  doca_error_t result;
+/*
+* Comm Channel user defined packet format
+* |data type | data length|
+* |----------+------------|
+* |        data           |
+* 
+*/
+doca_error_t start_comm_channel_sendrecv(void *buffer, size_t data_len, bool is_sender, struct mpi_dpuo_config *dpuo_config, struct mpi_dpuo_cc_objects *cc_objects) {
+	doca_error_t result;
 
 	if (is_sender) {
 		/* Sender */
-		struct mpi_dpuo_message msg;
+		struct mpi_dpuo_message_v2 *msg;
 
 		/* Fill cc message that is sent to DPU */
-		memset(&msg, 0, sizeof(struct mpi_dpuo_message));
-		msg.type = MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST;
-		msg.buffer_len = data_len;
-    	memcpy(msg.buffer, buffer, data_len);
-		// DOCA_LOG_INFO("Message sent to DPU");
-		// DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(msg.type));
-		// DOCA_LOG_INFO("-buffer: %s", msg.buffer);
-		// DOCA_LOG_INFO("-buffer_len %zd", msg.buffer_len);
+		msg = (struct mpi_dpuo_message_v2 *)calloc(1, sizeof(struct mpi_dpuo_message_v2));
+		msg->type = MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST;
+		msg->buffer_len = data_len;
+		memcpy(msg->buffer, buffer, data_len);
+		DOCA_LOG_INFO("Sender: Message sent to DPU");
+		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(msg->type));
+		DOCA_LOG_INFO("-buffer_len %zd", msg->buffer_len);
 
-
-		result = doca_comm_channel_ep_sendto(cc_objects->cc_ep, &msg, (size_t)sizeof(struct mpi_dpuo_message), DOCA_CC_MSG_FLAG_NONE, cc_objects->cc_peer_addr);
+		result = cc_chunk_data_send(cc_objects->cc_ep, &cc_objects->cc_peer_addr, msg, msg->buffer_len+MPI_DPUO_MESSAGE_V2_HDR_LEN);
 		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("Message was not sent: %s", doca_error_get_descr(result));
+			DOCA_LOG_ERR("Failed to send data chunks through CC");
 			return result;
 		}
 	} else {
 		/* Receiver */
-		struct mpi_dpuo_message msg;
-		struct mpi_dpuo_message recv_msg;
-		size_t recv_msg_len = sizeof(struct mpi_dpuo_message);
-		memset(&msg, 0, sizeof(msg));
-		memset(&recv_msg, 0, sizeof(recv_msg));
+		struct mpi_dpuo_message_v2 *msg;
+		struct mpi_dpuo_message_v2 *recv_msg;
+		size_t recv_msg_len = MPI_DPUO_MESSAGE_V2_HDR_LEN + data_len;
+		msg = (struct mpi_dpuo_message_v2 *)calloc(1, sizeof(struct mpi_dpuo_message_v2));
 
 		/* Fill cc message that is sent to DPU */
-		msg.type = MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST;
-		msg.buffer_len = data_len;
-		// DOCA_LOG_INFO("Message sent to DPU");
-		// DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg.type));
-		// DOCA_LOG_INFO("-buffer_len %zd", msg.buffer_len);
-		
-		result = doca_comm_channel_ep_sendto(cc_objects->cc_ep, &msg, (size_t)sizeof(struct mpi_dpuo_message), DOCA_CC_MSG_FLAG_NONE, cc_objects->cc_peer_addr);
+		msg->type = MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST;
+		msg->buffer_len = data_len;
+		DOCA_LOG_INFO("Receiver: CC_Send Message sent to DPU");
+		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(msg->type));
+		DOCA_LOG_INFO("-buffer_len %zd", msg->buffer_len);
+
+		result = cc_chunk_data_send(cc_objects->cc_ep, &cc_objects->cc_peer_addr, msg, MPI_DPUO_MESSAGE_V2_HDR_LEN);
 		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("cc send failed: %s", doca_error_get_descr(result));
+			DOCA_LOG_ERR("Failed to send data chunks through CC");
 			return result;
 		}
+		DOCA_LOG_INFO("Receiver: CC_Send finished");
 		
+		DOCA_LOG_INFO("Receiver: CC_Recv waiting for data from DPU");
 		/* Waiting for message from DPU daemon(compress_proxy)*/
-		while ((result = doca_comm_channel_ep_recvfrom(cc_objects->cc_ep, &recv_msg, &recv_msg_len, DOCA_CC_MSG_FLAG_NONE, 
-					&cc_objects->cc_peer_addr)) == DOCA_ERROR_AGAIN) {
-			if (quit_app) {
-				result = DOCA_ERROR_UNEXPECTED;
-				break;
-			}
-			recv_msg_len = sizeof(struct mpi_dpuo_message);
-		}
+		result = cc_chunk_data_recv(cc_objects->cc_ep, &cc_objects->cc_peer_addr, (void **)(&recv_msg), &recv_msg_len);
 		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("cc send failed: %s", doca_error_get_descr(result));
-			return result;
+			DOCA_LOG_ERR("Failed to receive data chunks through CC");
 		}
 
-		// DOCA_LOG_INFO("Message received from DPU");
-		// DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg.type));
-		// DOCA_LOG_INFO("-buffer: %s", recv_msg.buffer);
-		// DOCA_LOG_INFO("-buffer_len: %zd", recv_msg.buffer_len);
-		// DOCA_LOG_INFO("-total length: %ld", recv_msg_len);
-		if (recv_msg.type == MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE) {
-			memcpy(buffer, recv_msg.buffer, recv_msg.buffer_len);
+		DOCA_LOG_INFO("Receiver: Message received from DPU");
+		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg->type));
+		DOCA_LOG_INFO("-buffer: %s", recv_msg->buffer);
+		DOCA_LOG_INFO("-buffer_len: %zd", recv_msg->buffer_len);
+		DOCA_LOG_INFO("-total length: %ld", recv_msg_len);
+		if (recv_msg->type == MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE) {
+			memcpy(buffer, recv_msg->buffer, recv_msg->buffer_len);
 		}
 	}
   return result;
@@ -221,11 +218,11 @@ int MPI_Init(int *argc, char ***argv)
     print_cpxy_config(&cfg);
 
     /* Create a logger backend that prints to the standard output */
-    result = doca_log_backend_create_with_file(stderr, &log_backend);
-    if (result != DOCA_SUCCESS) {
-      DOCA_LOG_ERR("Failed to create doca_log backend on rank");
-      return -1;
-    }
+    // result = doca_log_backend_create_standard();
+    // if (result != DOCA_SUCCESS) {
+    //   DOCA_LOG_ERR("Failed to create doca_log backend");
+    //   return -1;
+    // }
 
     result = create_comm_channel(server_name, &cfg, &cc_objects);
     if (result != DOCA_SUCCESS) {

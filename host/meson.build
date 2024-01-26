@@ -46,12 +46,15 @@ app_dependencies += libmpi_dep
 lib_sources = [
 	'extern_dpuo.c',
 	'../comp_proxy/common.c',
+	'../comp_proxy/comm_channel_util.c',
+	'../comp_proxy/utils.c',
 ]
 
 inc_dir = include_directories(
     '/opt/mellanox/doca/include',
 	'/home/k-takashima/ompi/build/include', # OpenMPI
     '../comp_proxy',
+    '../comp_proxy/include',
 )
 
 shared_library('extern_dpuo', lib_sources, include_directories: inc_dir, dependencies: app_dependencies)
