@@ -54,11 +54,12 @@
 
 DOCA_LOG_REGISTER(COMPRESS_PROXY);
 
+static struct cpxy_config cfg;
 static uint16_t server_port    = DEFAULT_PORT;
 static sa_family_t ai_family   = AF_INET;
 static int connection_closed   = 1;
 
-static bool quit_app;		/* Shared variable to allow for a proper shutdown */
+bool quit_app;		/* Shared variable to allow for a proper shutdown */
 
 static void
 signal_handler(int signum)
@@ -90,6 +91,12 @@ static void stream_recv_cb(void *request, ucs_status_t status, size_t length,
                            void *user_data)
 {
     common_cb(user_data, "stream_recv_cb");
+}
+
+static void tag_recv_cb(void *request, ucs_status_t status,
+                        const ucp_tag_recv_info_t *info, void *user_data)
+{
+    common_cb(user_data, "tag_recv_cb");
 }
 
 /**
@@ -264,6 +271,52 @@ static inline int send_recv_stream(
     }
 
     return request_finalize(ucp_worker, request, &ctx, is_receiver, NULL);
+}
+
+static inline int send_recv_tag(
+    ucp_worker_h ucp_worker, ucp_ep_h ep, 
+    int is_receiver, void *buf, size_t *buf_len)
+{
+    ucp_request_param_t param;
+    void *request;
+    test_req_t ctx;
+    int is_sender = !is_receiver;
+
+    /* Set send/recv shared params */
+    ctx.complete       = 0;
+    param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+                          UCP_OP_ATTR_FIELD_DATATYPE |
+                          UCP_OP_ATTR_FIELD_USER_DATA;
+    param.datatype     = ucp_dt_make_contig(1);
+    param.user_data    = &ctx;
+
+    if (is_sender) {
+        /* Client sends a message to the server using the Tag-Matching API */
+        param.cb.send = send_cb;
+        request       = ucp_tag_send_nbx(ep, buf, *buf_len, TAG, &param);
+    } else {
+        /* Server receives a message from the client using the Tag-Matching API */
+        param.cb.recv = tag_recv_cb;
+        request       = ucp_tag_recv_nbx(ucp_worker, buf, *buf_len, TAG, 0,
+                                         &param);
+    }
+
+    return request_finalize(ucp_worker, request, &ctx, is_receiver, NULL);
+}
+
+static inline int send_recv(
+    ucp_worker_h ucp_worker, ucp_ep_h ep, 
+    int is_receiver, void *buf, size_t *buf_len, send_recv_type_t send_recv_type)
+{
+    switch (send_recv_type) {
+        case CLIENT_SERVER_SEND_RECV_STREAM:
+            return send_recv_stream(ucp_worker, ep, is_receiver, buf, buf_len);
+        case CLIENT_SERVER_SEND_RECV_TAG:
+            return send_recv_tag(ucp_worker, ep, is_receiver, buf, buf_len);
+        default:
+            DOCA_LOG_ERR("Unknown send_recv_type_t %d", send_recv_type);
+            return -1;
+    }
 }
 
 static char* sockaddr_get_ip_str(const struct sockaddr_storage *sock_addr,
@@ -451,9 +504,8 @@ static int proxy_progress(ucp_worker_h ucp_worker,
         DOCA_LOG_ERR("CC Message was not received: %s", doca_error_get_descr(result));
         return result;
     }
-    DOCA_LOG_INFO("Received message from host through CC type: %s", mpi_dpuo_message_type_string(msg_from_host->type));
-    DOCA_LOG_INFO("Received message from host through CC buffer_len: '%zd'", msg_from_host->buffer_len);
-    DOCA_LOG_INFO("Received message from host through CC buffer↓\n%s", hex_dump(msg_from_host, MPI_DPUO_MESSAGE_V2_HDR_LEN+msg_from_host->buffer_len));
+    DOCA_LOG_DBG("Received message from host through CC type: %s", mpi_dpuo_message_type_string(msg_from_host->type));
+    DOCA_LOG_DBG("Received message from host through CC buffer_len: '%zd'", msg_from_host->buffer_len);
 
     /* UCP_Send/Recv */
     DOCA_LOG_INFO("DATA/%s/%s", mpi_dpuo_message_type_string(msg_from_host->type), cpxy_sendrecv_type_string(send_recv_type));
@@ -465,7 +517,7 @@ static int proxy_progress(ucp_worker_h ucp_worker,
         struct timespec ts, te;
         GET_TIME(ts);
 #endif
-        ret = send_recv_stream(ucp_worker, ucp_ep, false, msg_from_host->buffer, &msg_from_host->buffer_len);
+        ret = send_recv(ucp_worker, ucp_ep, false, msg_from_host->buffer, &msg_from_host->buffer_len, send_recv_type);
         if (ret != 0) {
             return ret;
         }
@@ -482,7 +534,7 @@ static int proxy_progress(ucp_worker_h ucp_worker,
         msg = calloc(1 , sizeof(struct mpi_dpuo_message_v2));
 
         DOCA_LOG_INFO("UCP_Recv start. Waiting for data from another DPU");
-        ret = send_recv_stream(ucp_worker, ucp_ep, true, msg->buffer, &buf_len);
+        ret = send_recv(ucp_worker, ucp_ep, true, msg->buffer, &buf_len, send_recv_type);
         if (ret != 0) {
             return ret;
         }
@@ -490,7 +542,7 @@ static int proxy_progress(ucp_worker_h ucp_worker,
         msg->type = MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE;
         msg->buffer_len = buf_len;
 
-        DOCA_LOG_INFO("CC_Send to host start data↓\n%s", hex_dump(msg, MPI_DPUO_MESSAGE_V2_HDR_LEN+msg->buffer_len));
+        DOCA_LOG_DBG("CC_Send to host start data↓\n%s", hex_dump(msg, MPI_DPUO_MESSAGE_V2_HDR_LEN+msg->buffer_len));
 
         result = cc_chunk_data_send(cc_objects->cc_ep, &cc_objects->cc_peer_addr, msg, msg->buffer_len+MPI_DPUO_MESSAGE_V2_HDR_LEN);
         if (result != DOCA_SUCCESS) {
@@ -566,7 +618,7 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
         char hello_msg[5] = "";
         size_t hello_msg_len = 5;
         DOCA_LOG_INFO("Waiting for Hello Message");
-        ret = send_recv_stream(ucp_data_worker, server_ep, 1, hello_msg, &hello_msg_len);
+        ret = send_recv(ucp_data_worker, server_ep, 1, hello_msg, &hello_msg_len, send_recv_type);
         if (ret != 0) {
             goto err_ep;
         }
@@ -615,7 +667,7 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
     char hello_msg[5] = "HELLO";
     size_t hello_msg_len = 5;
     DOCA_LOG_INFO("Hello Message Sent");
-    ret = send_recv_stream(ucp_worker, client_ep, 0, hello_msg, &hello_msg_len);
+    ret = send_recv(ucp_worker, client_ep, 0, hello_msg, &hello_msg_len, send_recv_type);
     if (ret != 0) {
         goto err_ep;
     }
@@ -857,13 +909,30 @@ static doca_error_t server_ip_addr_callback(void *param, void *config)
 	return DOCA_SUCCESS;
 }
 
+static doca_error_t send_recv_type_callback(void *param, void *config)
+{
+	struct cpxy_config *cfg = (struct cpxy_config *)config;
+	const char *send_recv_type = (char *)param;
+
+    if (strncmp(send_recv_type, "stream", 5) == 0) {
+        cfg->send_recv_type = CLIENT_SERVER_SEND_RECV_STREAM;
+    } else if (strncmp(send_recv_type, "tag", 3) == 0) {
+        cfg->send_recv_type = CLIENT_SERVER_SEND_RECV_TAG;
+    } else {
+		DOCA_LOG_ERR("Unkown send_recv_type %s", send_recv_type);
+		return DOCA_ERROR_INVALID_VALUE;
+    }
+
+	return DOCA_SUCCESS;
+}
+
 doca_error_t register_cpxy_params()
 {
 	doca_error_t result;
 
 	struct doca_argp_param 
         *dev_pci_addr_param, *rep_pci_addr_param,
-        *server_ip_addr_param;
+        *server_ip_addr_param, *send_recv_type_param;
 
 	/* Comm Channel DOCA device PCI address */
 	result = doca_argp_param_create(&dev_pci_addr_param);
@@ -918,6 +987,23 @@ doca_error_t register_cpxy_params()
 		return result;
 	}
 
+    /* Send/Recv Type */
+    result = doca_argp_param_create(&send_recv_type_param);
+    if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to create ARGP param: %s", doca_error_get_descr(result));
+		return result;
+	}
+	doca_argp_param_set_short_name(send_recv_type_param, "c");
+	doca_argp_param_set_long_name(send_recv_type_param, "send_recv_type");
+	doca_argp_param_set_description(send_recv_type_param,
+					"Send/Recv type ('stream', 'tag')");
+	doca_argp_param_set_callback(send_recv_type_param, send_recv_type_callback);
+	doca_argp_param_set_type(send_recv_type_param, DOCA_ARGP_TYPE_STRING);
+	result = doca_argp_register_param(send_recv_type_param);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to register program param: %s", doca_error_get_descr(result));
+		return result;
+	}
 	return DOCA_SUCCESS;
 }
 
@@ -927,6 +1013,7 @@ void print_cpxy_config(struct cpxy_config *cfg)
     printf("cfg->server_ip_addr: %s\n", cfg->server_ip_addr);
     printf("cfg->cc_dev_pci_addr: %s\n", cfg->cc_dev_pci_addr);
     printf("cfg->cc_dev_rep_pci_addr: %s\n", cfg->cc_dev_rep_pci_addr);
+    printf("cfg->send_recv_type: %s\n", cpxy_sendrecv_type_string(cfg->send_recv_type));
     printf("-----------------------------\n");
 
 }
@@ -934,15 +1021,14 @@ void print_cpxy_config(struct cpxy_config *cfg)
 
 int main(int argc, char **argv)
 {
-	struct cpxy_config cfg;
     struct cpxy_cc_objects cc_objects;
-    send_recv_type_t send_recv_type = CLIENT_SERVER_SEND_RECV_DEFAULT;
     char *listen_addr = NULL;
     int result;
 
     strcpy(cfg.cc_dev_pci_addr, "03:00.1");
 	strcpy(cfg.cc_dev_rep_pci_addr, "0c:00.1");
 	strcpy(cfg.server_ip_addr, "");
+    cfg.send_recv_type = CLIENT_SERVER_SEND_RECV_TAG;
 
     /* Create a logger backend that prints to the standard output */
 	result = (int)doca_log_backend_create_standard();
@@ -992,7 +1078,7 @@ int main(int argc, char **argv)
     ucp_worker_h  ucp_worker;
 
     /* Initialize the UCX required objects */
-    result = init_ucp_context(&ucp_context, &ucp_worker, send_recv_type);
+    result = init_ucp_context(&ucp_context, &ucp_worker, cfg.send_recv_type);
     if (result != 0) {
         goto err;
     }
@@ -1008,10 +1094,10 @@ int main(int argc, char **argv)
     /* Client-Server initialization */
     if (strlen(cfg.server_ip_addr) == 0) {
         /* Server side */
-        result = run_server(ucp_context, ucp_worker, listen_addr, send_recv_type, &cc_objects);
+        result = run_server(ucp_context, ucp_worker, listen_addr, cfg.send_recv_type, &cc_objects);
     } else {
         /* Client side */
-        result = run_client(ucp_worker, cfg.server_ip_addr, send_recv_type, &cc_objects);
+        result = run_client(ucp_worker, cfg.server_ip_addr, cfg.send_recv_type, &cc_objects);
     }
 
     /* UCP worker/context cleanup */

@@ -15,8 +15,6 @@ char *cpxy_sendrecv_type_string(send_recv_type_t type) {
         return "RECV_STREAM";
     case CLIENT_SERVER_SEND_RECV_TAG:
         return "RECV_TAG";
-    case CLIENT_SERVER_SEND_RECV_AM:
-        return "RECV_AM";
     default:
         return "Unknown send_recv_type";
     }
@@ -52,6 +50,7 @@ struct cpxy_config {
     char cc_dev_pci_addr[PCI_ADDR_LEN];			/* Comm Channel DOCA device PCI address */
 	char cc_dev_rep_pci_addr[PCI_ADDR_LEN];			/* Comm Channel DOCA device representor PCI address */
     char server_ip_addr[IP_ADDR_LEN];
+    send_recv_type_t send_recv_type;
 };
 
 struct cpxy_cc_objects {
@@ -60,5 +59,10 @@ struct cpxy_cc_objects {
     struct doca_dev *cc_dev;
     struct doca_dev_rep *cc_dev_rep;
 };
+
+// struct cpxy_compress_message {
+//     uint64_t    data_len;
+//     void        *data;
+// };
 
 #endif
