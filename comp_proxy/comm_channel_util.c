@@ -19,6 +19,8 @@ if (result != DOCA_SUCCESS) {\
 
 DOCA_LOG_REGISTER(COMM_CHANNEL_UTIL);
 
+extern bool quit_app;
+
 char *mpi_dpuo_message_type_string(mpi_dpuo_message_type_t type) {
     switch (type) {
     case MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST:
@@ -59,10 +61,13 @@ cc_chunk_data_send(struct doca_comm_channel_ep_t *ep,
 
 	/* Send the number of chunks  */
 	total_chunks = (buf_len + CC_MAX_MSG_SIZE - 1) / CC_MAX_MSG_SIZE;
-	DOCA_LOG_INFO("CC_Send total_chunks: %"PRIu32"", total_chunks);
-	DOCA_LOG_INFO("CC_Send total_chunks: ↓\n%s", hex_dump(&total_chunks, sizeof(uint32_t)));
     total_chunks_network_order = htonl(total_chunks);
-	DOCA_LOG_INFO("CC_Send total_chunks_network_order: ↓\n%s", hex_dump(&total_chunks_network_order, sizeof(uint32_t)));
+
+    DOCA_LOG_INFO("CC_Send total_chunks start.");
+	DOCA_LOG_DBG("CC_Send total_chunks: %"PRIu32"", total_chunks);
+	DOCA_LOG_DBG("CC_Send total_chunks: ↓\n%s", hex_dump(&total_chunks, sizeof(uint32_t)));
+	DOCA_LOG_DBG("CC_Send total_chunks_network_order: ↓\n%s", hex_dump(&total_chunks_network_order, sizeof(uint32_t)));
+
 	while ((result = doca_comm_channel_ep_sendto(ep, (void *)&total_chunks_network_order, sizeof(uint32_t), DOCA_CC_MSG_FLAG_NONE,
 						     *peer_addr)) == DOCA_ERROR_AGAIN) {
         nanosleep(&ts, &ts);
@@ -71,9 +76,9 @@ cc_chunk_data_send(struct doca_comm_channel_ep_t *ep,
 	CHECK_ERR("Message was not sent: %s", doca_error_get_descr(result))
 
 	/* Send data to the remote peer */
-    DOCA_LOG_INFO("Start sending chunks to host through CC");
+    DOCA_LOG_DBG("Start sending chunks to host through CC");
 	for (uint32_t i = 0; i < total_chunks; i++) {
-    	DOCA_LOG_INFO("chunk sending: %"PRIu32"/%"PRIu32"", i, total_chunks);
+    	DOCA_LOG_DBG("chunk sending: %"PRIu32"/%"PRIu32"", i, total_chunks);
 		chunk_len = MIN(buf_len, CC_MAX_MSG_SIZE);
 		while ((result = doca_comm_channel_ep_sendto(ep, buf, chunk_len, DOCA_CC_MSG_FLAG_NONE, 
                                 *peer_addr)) == DOCA_ERROR_AGAIN) {
@@ -81,7 +86,7 @@ cc_chunk_data_send(struct doca_comm_channel_ep_t *ep,
         }
 		CHECK_ERR("Message was not sent: %s", doca_error_get_descr(result))
 
-    	DOCA_LOG_INFO("chunk sent: %"PRIu32"/%"PRIu32"", i, total_chunks);
+    	DOCA_LOG_DBG("chunk sent: %"PRIu32"/%"PRIu32"", i, total_chunks);
 		buf += chunk_len;
 		buf_len -= chunk_len;
 	}
@@ -123,6 +128,7 @@ cc_chunk_data_recv(struct doca_comm_channel_ep_t *ep,
     DOCA_LOG_INFO("CC_Recv total_chunks start.");
 	while((result = doca_comm_channel_ep_recvfrom(ep, &total_chunks_msg, &total_chunks_msg_len, DOCA_CC_MSG_FLAG_NONE,
 							peer_addr) == DOCA_ERROR_AGAIN)) {
+		if (quit_app) return DOCA_ERROR_UNEXPECTED;
 		total_chunks_msg_len = sizeof(uint32_t);
 		nanosleep(&ts, &ts);
 		if ((counter++) == timeout_num_of_iterations) {
@@ -160,6 +166,7 @@ cc_chunk_data_recv(struct doca_comm_channel_ep_t *ep,
 		chunk_len = CC_MAX_MSG_SIZE;
 		while((result = doca_comm_channel_ep_recvfrom(ep, chunk, &chunk_len, DOCA_CC_MSG_FLAG_NONE,
 							peer_addr) == DOCA_ERROR_AGAIN)) {
+			if (quit_app) return DOCA_ERROR_UNEXPECTED;
 			chunk_len = CC_MAX_MSG_SIZE;
 			nanosleep(&ts, &ts);
 			counter++;
@@ -170,7 +177,8 @@ cc_chunk_data_recv(struct doca_comm_channel_ep_t *ep,
 		}
 		CHECK_ERR("Message was not received: %s", doca_error_get_descr(result))
         
-        DOCA_LOG_INFO("chunk%"PRIu32" received %.*s", i, (int)chunk_len, chunk);
+        DOCA_LOG_DBG("chunk%"PRIu32" received %.*s", i, (int)chunk_len, chunk);
+
 		if (buf_ptr - *buf + CC_MAX_MSG_SIZE > MAX_DATA_SIZE) {
 			DOCA_LOG_ERR("Received data exceeded maximum size");
 			return DOCA_ERROR_UNEXPECTED;
