@@ -27,7 +27,7 @@ endif
 
 # Remove warnings of experimental compile
 add_project_arguments('-D DOCA_ALLOW_EXPERIMENTAL_API', language: 'c')
-add_project_arguments('-D DOCA_LOGGING_ALLOW_DLOG', language: 'c')
+add_project_arguments('-D DOCA_LOGGING_ALLOW_TRACE', language: 'c')
 
 
 app_dependencies = []
@@ -49,6 +49,7 @@ sources = [
     'pack.c',
     'utils.c',
     'comm_channel_util.c',
+    'compress_util.c',
 ]
 
 inc_dir = include_directories(

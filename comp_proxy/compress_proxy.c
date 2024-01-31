@@ -15,6 +15,7 @@
 #include "common.h"
 #include "compress_proxy.h"
 #include "comm_channel_util.h"
+#include "compress_util.h"
 
 #include <ucp/api/ucp.h>
 
@@ -235,13 +236,14 @@ check_request_status:
 }
 
 /**
+ * NOTE: !!Caution: This function is not tested!!
  * Send and receive a message using the Stream API.
  * The client sends a message to the server and waits until the send it completed.
  * The server receives a message from the client and waits for its completion.
  */
 static inline int send_recv_stream(
-    ucp_worker_h ucp_worker, ucp_ep_h ep, 
-    int is_receiver, void *buf, size_t *buf_len)
+    ucp_worker_h ucp_worker, ucp_ep_h ep, int is_receiver, 
+    ucp_dt_iov_t *iov, size_t iov_cnt)
 {
     ucp_request_param_t param;
     test_req_t *request;
@@ -254,28 +256,29 @@ static inline int send_recv_stream(
     param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
                           UCP_OP_ATTR_FIELD_DATATYPE |
                           UCP_OP_ATTR_FIELD_USER_DATA;
-    param.datatype     = ucp_dt_make_contig(1);
+    param.datatype     = UCP_DATATYPE_IOV;
     param.user_data    = &ctx;
 
 
     if (is_sender) {
         /* Client sends a message to the server using the stream API */
         param.cb.send = send_cb;
-        request       = ucp_stream_send_nbx(ep, buf, *buf_len, &param);
+        request       = ucp_stream_send_nbx(ep, iov, iov_cnt, &param);
     } else {
         /* Server receives a message from the client using the stream API */
+        size_t recv_msg_len;
         param.op_attr_mask  |= UCP_OP_ATTR_FIELD_FLAGS;
         param.flags          = UCP_STREAM_RECV_FLAG_WAITALL;
         param.cb.recv_stream = stream_recv_cb;
-        request              = ucp_stream_recv_nbx(ep, buf, *buf_len, buf_len, &param);
+        request              = ucp_stream_recv_nbx(ep, iov, iov_cnt, &recv_msg_len, &param);
     }
 
     return request_finalize(ucp_worker, request, &ctx, is_receiver, NULL);
 }
 
 static inline int send_recv_tag(
-    ucp_worker_h ucp_worker, ucp_ep_h ep, 
-    int is_receiver, void *buf, size_t *buf_len)
+    ucp_worker_h ucp_worker, ucp_ep_h ep, int is_receiver, 
+    ucp_dt_iov_t *iov, size_t iov_cnt)
 {
     ucp_request_param_t param;
     void *request;
@@ -287,32 +290,31 @@ static inline int send_recv_tag(
     param.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
                           UCP_OP_ATTR_FIELD_DATATYPE |
                           UCP_OP_ATTR_FIELD_USER_DATA;
-    param.datatype     = ucp_dt_make_contig(1);
+    param.datatype     = UCP_DATATYPE_IOV;
     param.user_data    = &ctx;
 
     if (is_sender) {
         /* Client sends a message to the server using the Tag-Matching API */
         param.cb.send = send_cb;
-        request       = ucp_tag_send_nbx(ep, buf, *buf_len, TAG, &param);
+        request       = ucp_tag_send_nbx(ep, iov, iov_cnt, TAG, &param);
     } else {
         /* Server receives a message from the client using the Tag-Matching API */
         param.cb.recv = tag_recv_cb;
-        request       = ucp_tag_recv_nbx(ucp_worker, buf, *buf_len, TAG, 0,
-                                         &param);
+        request       = ucp_tag_recv_nbx(ucp_worker, iov, iov_cnt, TAG, 0,
+                                         &param);                                         
     }
-
     return request_finalize(ucp_worker, request, &ctx, is_receiver, NULL);
 }
 
 static inline int send_recv(
     ucp_worker_h ucp_worker, ucp_ep_h ep, 
-    int is_receiver, void *buf, size_t *buf_len, send_recv_type_t send_recv_type)
+    int is_receiver, ucp_dt_iov_t *iov, size_t iov_cnt, send_recv_type_t send_recv_type)
 {
     switch (send_recv_type) {
         case CLIENT_SERVER_SEND_RECV_STREAM:
-            return send_recv_stream(ucp_worker, ep, is_receiver, buf, buf_len);
+            return send_recv_stream(ucp_worker, ep, is_receiver, iov, iov_cnt);
         case CLIENT_SERVER_SEND_RECV_TAG:
-            return send_recv_tag(ucp_worker, ep, is_receiver, buf, buf_len);
+            return send_recv_tag(ucp_worker, ep, is_receiver, iov, iov_cnt);
         default:
             DOCA_LOG_ERR("Unknown send_recv_type_t %d", send_recv_type);
             return -1;
@@ -494,7 +496,7 @@ static int proxy_progress(ucp_worker_h ucp_worker,
     int ret = 0;
 
     // Receive buffer for data from Comm Channel
-    struct mpi_dpuo_message_v2 *msg_from_host;
+    struct mpi_dpuo_message_v2 *msg_from_host; // This ptr is initialized in cc_chunk_data_recv
     size_t msg_from_host_len = sizeof(struct mpi_dpuo_message_v2);
 
     DOCA_LOG_INFO("CC_Recv waiting...");
@@ -511,49 +513,108 @@ static int proxy_progress(ucp_worker_h ucp_worker,
     DOCA_LOG_INFO("DATA/%s/%s", mpi_dpuo_message_type_string(msg_from_host->type), cpxy_sendrecv_type_string(send_recv_type));
     if (msg_from_host->type == MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST) {
         /* This process is sender */
+
+        void *compressed_data; // This ptr is initialized in compress_deflate
+        size_t compressed_data_len;
+        struct compress_param comp_param;
+        comp_param.mode = COMPRESS_MODE_COMPRESS_DEFLATE;
+        strncpy(comp_param.pci_address, cfg.cc_dev_pci_addr, PCI_ADDR_LEN);
+        result = compress_deflate(
+            msg_from_host->buffer, msg_from_host->buffer_len,
+            &compressed_data, &compressed_data_len, &comp_param);
+        if (result != DOCA_SUCCESS) {
+            DOCA_LOG_ERR("Compress failed: %s", doca_error_get_descr(result));
+            ret = -1;
+            goto free_ucp_send_msg;
+        }
+        DOCA_LOG_INFO("Compression finished!");
+
         DOCA_LOG_INFO("UCP_Send start");
 
 #ifdef DEBUG_TIMER_ENABLED
         struct timespec ts, te;
         GET_TIME(ts);
 #endif
-        ret = send_recv(ucp_worker, ucp_ep, false, msg_from_host->buffer, &msg_from_host->buffer_len, send_recv_type);
+        struct cpxy_compress_message cpxy_msg;
+        cpxy_msg.header.data_len = compressed_data_len;
+        cpxy_msg.header.is_compressed = true;
+        cpxy_msg.data = compressed_data;
+        
+        ucp_dt_iov_t iov[2]; /* Message header and body */
+        iov[0].buffer = (void *)&cpxy_msg.header;
+        iov[0].length = sizeof(cpxy_msg.header);
+        iov[1].buffer = cpxy_msg.data;
+        iov[1].length = cpxy_msg.header.data_len;
+        ret = send_recv(ucp_worker, ucp_ep, false, iov, 2, send_recv_type);
         if (ret != 0) {
-            return ret;
+            goto free_ucp_send_msg;
         }
 #ifdef DEBUG_TIMER_ENABLED
         GET_TIME(te);
         printf("UCP_Send: ");
         PRINT_TIME(ts, te);
 #endif
-
+free_ucp_send_msg:
+        free(compressed_data);
     } else if (msg_from_host->type == MPI_DPUO_MESSAGE_TYPE_RECEIVE_REQUEST) {
         /* This process is receiver, should sends data to Host through CC. */
-        struct mpi_dpuo_message_v2 *msg;
-        size_t buf_len = msg_from_host->buffer_len;
-        msg = calloc(1 , sizeof(struct mpi_dpuo_message_v2));
 
         DOCA_LOG_INFO("UCP_Recv start. Waiting for data from another DPU");
-        ret = send_recv(ucp_worker, ucp_ep, true, msg->buffer, &buf_len, send_recv_type);
-        if (ret != 0) {
-            return ret;
-        }
 
+        void *data = (void *)calloc(MAX_DATA_SIZE, sizeof(char));
+        struct cpxy_compress_message cpxy_msg;
+        cpxy_msg.data = data;
+        ucp_dt_iov_t iov[2]; /* Message header and body */
+        iov[0].buffer = (void *)&cpxy_msg.header;
+        iov[0].length = sizeof(cpxy_msg.header);
+        iov[1].buffer = cpxy_msg.data;
+        iov[1].length = MAX_DATA_SIZE;
+
+        ret = send_recv(ucp_worker, ucp_ep, true, iov, 2, send_recv_type);
+        if (ret != 0) goto free_ucp_recv_msg;
+        DOCA_LOG_INFO("UCP_Recv finished. cpxy_msg.header.data_len=%zu", cpxy_msg.header.data_len);
+
+        struct compress_param decomp_param;
+        decomp_param.mode = COMPRESS_MODE_DECOMPRESS_DEFLATE;
+        strncpy(decomp_param.pci_address, cfg.cc_dev_pci_addr, PCI_ADDR_LEN);
+
+        void *plain_data;  // This ptr is initialized in decompress_deflate.
+        size_t plain_data_len;
+        result = decompress_deflate(
+            cpxy_msg.data, cpxy_msg.header.data_len,
+            (void **)&plain_data, &plain_data_len, &decomp_param);
+        if (result != DOCA_SUCCESS) {
+            DOCA_LOG_ERR("Failed to decompress data: %s", doca_error_get_descr(result));
+            ret = -1;
+            goto free_ucp_recv_msg;
+        }
+        DOCA_LOG_INFO("Decomp finished! plain_data_len=%zu", plain_data_len);
+
+
+        struct mpi_dpuo_message_v2 *msg;
+        msg = calloc(1 , sizeof(struct mpi_dpuo_message_v2));
         msg->type = MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE;
-        msg->buffer_len = buf_len;
+        msg->buffer_len = plain_data_len;
+        memcpy(msg->buffer, plain_data, plain_data_len);
 
         DOCA_LOG_DBG("CC_Send to host start data↓\n%s", hex_dump(msg, MPI_DPUO_MESSAGE_V2_HDR_LEN+msg->buffer_len));
 
         result = cc_chunk_data_send(cc_objects->cc_ep, &cc_objects->cc_peer_addr, msg, msg->buffer_len+MPI_DPUO_MESSAGE_V2_HDR_LEN);
         if (result != DOCA_SUCCESS) {
             DOCA_LOG_ERR("Message was not received: %s", doca_error_get_descr(result));
-            return ret;
+            ret = -1;
+            goto free_cc_recv_msg;
         }
+free_cc_recv_msg:
+        free(msg);
+free_ucp_recv_msg:
+        free(data);
         DOCA_LOG_INFO("CC_Send to host finished");
     } else {
         DOCA_LOG_ERR("Unknown mpi_dpuo_message_type_t %d", msg_from_host->type);
     }
 
+    free(msg_from_host);
     return ret;
 }
 
@@ -617,8 +678,12 @@ static int run_server(ucp_context_h ucp_context, ucp_worker_h ucp_worker,
 
         char hello_msg[5] = "";
         size_t hello_msg_len = 5;
+        ucp_dt_iov_t hello_msg_iov;
+        hello_msg_iov.buffer = (void *)hello_msg;
+        hello_msg_iov.length = hello_msg_len;
+
         DOCA_LOG_INFO("Waiting for Hello Message");
-        ret = send_recv(ucp_data_worker, server_ep, 1, hello_msg, &hello_msg_len, send_recv_type);
+        ret = send_recv(ucp_data_worker, server_ep, true, &hello_msg_iov, 1, send_recv_type);
         if (ret != 0) {
             goto err_ep;
         }
@@ -666,8 +731,12 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
 
     char hello_msg[5] = "HELLO";
     size_t hello_msg_len = 5;
+    ucp_dt_iov_t hello_msg_iov;
+    hello_msg_iov.buffer = (void *)hello_msg;
+    hello_msg_iov.length = hello_msg_len;
+
     DOCA_LOG_INFO("Hello Message Sent");
-    ret = send_recv(ucp_worker, client_ep, 0, hello_msg, &hello_msg_len, send_recv_type);
+    ret = send_recv(ucp_worker, client_ep, false, &hello_msg_iov, 1, send_recv_type);
     if (ret != 0) {
         goto err_ep;
     }

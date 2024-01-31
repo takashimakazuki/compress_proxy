@@ -2,6 +2,8 @@
 #ifndef COMPRESS_PROXY_H_
 #define COMPRESS_PROXY_H_
 
+#include <stdbool.h>
+
 typedef enum {
     CLIENT_SERVER_SEND_RECV_STREAM  = UCS_BIT(0),
     CLIENT_SERVER_SEND_RECV_TAG     = UCS_BIT(1),
@@ -60,9 +62,12 @@ struct cpxy_cc_objects {
     struct doca_dev_rep *cc_dev_rep;
 };
 
-// struct cpxy_compress_message {
-//     uint64_t    data_len;
-//     void        *data;
-// };
+struct cpxy_compress_message {
+    struct header_ {
+        bool    is_compressed;
+        size_t    data_len;
+    } header;
+    void        *data;
+};
 
 #endif

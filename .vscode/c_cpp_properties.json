@@ -4,7 +4,10 @@
             "name": "Linux",
             "includePath": [
                 "${default}",
-                "${workspaceFolder}/comm_channel"
+                "${workspaceFolder}/comm_channel",
+                "${workspaceFolder}/comp_proxy",
+                "${workspaceFolder}/comp_proxy/include",
+                "${workspaceFolder}/host"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
