@@ -58,3 +58,6 @@ inc_dir = include_directories(
 )
 
 shared_library('extern_dpuo', lib_sources, include_directories: inc_dir, dependencies: app_dependencies)
+
+executable('test_init', ['test_init.c'], dependencies: app_dependencies)
+executable('test_sendrecv', ['test_sendrecv.c'], dependencies: app_dependencies)
