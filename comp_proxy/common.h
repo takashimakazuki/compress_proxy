@@ -16,6 +16,18 @@
 
 #include <doca_error.h>
 #include <doca_dev.h>
+#include <time.h>
+
+
+// #define DEBUG_TIMER_ENABLED    true
+
+#define GET_TIME(_timespec_val) {\
+    clock_gettime(CLOCK_MONOTONIC, &(_timespec_val));\
+}
+#define PRINT_TIME(_name, _ts, _te) {\
+    double _f = ((double)(_te).tv_sec*1e9 + (_te).tv_nsec) - ((double)(_ts).tv_sec*1e9 + (_ts).tv_nsec);\
+    printf("%30s: %10.2fus %10.4fms\n", #_name, _f/1000, _f/1000/1000);\
+}
 
 /* Function to check if a given device is capable of executing some task */
 typedef doca_error_t (*tasks_check)(struct doca_devinfo *);

@@ -6,8 +6,8 @@
 #include <doca_error.h>
 #include <doca_compress.h>
 
-#define SLEEP_IN_NANOS		(10 * 1000)		/* Sample the task every 10 microseconds */
-#define NUM_COMPRESS_TASKS	(1)			/* Number of compress tasks */
+#define SLEEP_IN_NANOS (1 * 10)		/* Sample the job every 10 nanoseconds */
+#define NUM_COMPRESS_TASKS	(2)			/* Number of compress tasks */
 
 /* Compress modes */
 enum compress_mode {
@@ -15,12 +15,6 @@ enum compress_mode {
 	COMPRESS_MODE_DECOMPRESS_DEFLATE,		/* Decompress mode */
 };
 
-/* Configuration struct */
-struct compress_param {
-	enum compress_mode mode;			/* Compress task type */
-	char pci_address[DOCA_DEVINFO_PCI_ADDR_SIZE];	/* Device PCI address */
-	bool output_checksum;				/* To output checksum or not */
-};
 
 /* DOCA compress resources */
 struct compress_resources {
@@ -29,6 +23,14 @@ struct compress_resources {
 	size_t num_remaining_tasks;			/* Number of remaining compress tasks */
 	enum compress_mode mode;			/* Compress mode - compress/decompress */
 	bool run_main_loop;				/* Controls whether progress loop should be run */
+};
+
+/* Configuration struct */
+struct compress_param {
+	enum compress_mode mode;			/* Compress mode - compress/decompress */
+	char pci_address[DOCA_DEVINFO_PCI_ADDR_SIZE];	/* Device PCI address */
+	bool output_checksum;				/* To output checksum or not */
+	struct compress_resources resource;
 };
 
 /* Describes result of a compress/decompress task */
@@ -66,9 +68,6 @@ doca_error_t
 submit_decompress_deflate_task(struct compress_resources *resources, struct doca_buf *src_buf, struct doca_buf *dst_buf,
 				uint64_t *output_checksum);
 
-doca_error_t
-allocate_compress_resources(const char *pci_addr, uint32_t max_bufs, struct compress_resources *resources);
-
 doca_error_t destroy_compress_resources(struct compress_resources *resources);
 
 doca_error_t
@@ -96,5 +95,14 @@ decompress_completed_callback(struct doca_compress_task_decompress_deflate *deco
 void
 decompress_error_callback(struct doca_compress_task_decompress_deflate *decompress_task,
 			  union doca_data task_user_data, union doca_data ctx_user_data);
+
+
+int compress_zstd(
+	void *plain_data, size_t plain_data_len, 
+	void **compressed_data, size_t *compressed_data_len);
+
+int decompress_zstd(
+	void *compressed_data, size_t compressed_data_len, 
+	void **plain_data, size_t *plain_data_len);
 
 #endif /* COMPRESS_COMMON_H_ */

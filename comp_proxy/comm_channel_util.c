@@ -9,7 +9,7 @@
 #include "common.h"
 #include "comm_channel_util.h"
 
-#define SLEEP_IN_NANOS (1 * 1000)		/* Sample the job every 10 microseconds */
+#define SLEEP_IN_NANOS (1 * 10)		/* Sample the job every 10 nanoseconds */
 
 #define CHECK_ERR(...) \
 if (result != DOCA_SUCCESS) {\
@@ -75,10 +75,13 @@ cc_chunk_data_send(struct doca_comm_channel_ep_t *ep,
     /* This error is happened on Receiver DPU */
 	CHECK_ERR("Message was not sent: %s", doca_error_get_descr(result))
 
+#ifdef DEBUG_TIMER_ENABLED
+	struct timespec tstart, tend;
+	GET_TIME(tstart);
+#endif
 	/* Send data to the remote peer */
     DOCA_LOG_DBG("Start sending chunks to host through CC");
 	for (uint32_t i = 0; i < total_chunks; i++) {
-    	DOCA_LOG_DBG("chunk sending: %"PRIu32"/%"PRIu32"", i, total_chunks);
 		chunk_len = MIN(buf_len, CC_MAX_MSG_SIZE);
 		while ((result = doca_comm_channel_ep_sendto(ep, buf, chunk_len, DOCA_CC_MSG_FLAG_NONE, 
                                 *peer_addr)) == DOCA_ERROR_AGAIN) {
@@ -86,10 +89,14 @@ cc_chunk_data_send(struct doca_comm_channel_ep_t *ep,
         }
 		CHECK_ERR("Message was not sent: %s", doca_error_get_descr(result))
 
-    	DOCA_LOG_DBG("chunk sent: %"PRIu32"/%"PRIu32"", i, total_chunks);
+    	DOCA_LOG_DBG("chunk sent: %"PRIu32"/%"PRIu32"", i+1, total_chunks);
 		buf += chunk_len;
 		buf_len -= chunk_len;
 	}
+#ifdef DEBUG_TIMER_ENABLED
+	GET_TIME(tend);
+	PRINT_TIME("cc_chunk_data_send(body)", tstart, tend);
+#endif
 	return DOCA_SUCCESS;
 }
 
@@ -116,7 +123,7 @@ cc_chunk_data_recv(struct doca_comm_channel_ep_t *ep,
 	struct timespec ts = {
 		.tv_nsec = SLEEP_IN_NANOS,
 	};
-	int timeout_num_of_iterations = (1 * 1000 * 1000) / (SLEEP_IN_NANOS / 1000);
+	int timeout_num_of_iterations = (1 * 1000 * 1000) / (SLEEP_IN_NANOS / 10);
 	int counter;
 	void *buf_ptr;
 	size_t chunk_len;
@@ -141,6 +148,10 @@ cc_chunk_data_recv(struct doca_comm_channel_ep_t *ep,
 			DOCA_LOG_ERR("Received wrong message size, required %ld, got %ld", sizeof(uint32_t), total_chunks_msg_len);
 			return DOCA_ERROR_UNEXPECTED;
 	}
+#ifdef DEBUG_TIMER_ENABLED
+        struct timespec tstart, tend;
+        GET_TIME(tstart);
+#endif
 
 	// Allocate buffer for receiving data
 	total_chunks = ntohl(total_chunks_msg);
@@ -169,23 +180,27 @@ cc_chunk_data_recv(struct doca_comm_channel_ep_t *ep,
 			if (quit_app) return DOCA_ERROR_UNEXPECTED;
 			chunk_len = CC_MAX_MSG_SIZE;
 			nanosleep(&ts, &ts);
-			counter++;
-			if (counter == timeout_num_of_iterations) {
+			if ((counter++) == timeout_num_of_iterations) {
 				DOCA_LOG_ERR("Message was not received at the given timeout");
 				return result;
 			}
 		}
 		CHECK_ERR("Message was not received: %s", doca_error_get_descr(result))
         
-        DOCA_LOG_DBG("chunk%"PRIu32" received %.*s", i, (int)chunk_len, chunk);
+        DOCA_LOG_DBG("received　chunk%"PRIu32"/%"PRIu32"", i+1, total_chunks);
 
 		if (buf_ptr - *buf + CC_MAX_MSG_SIZE > MAX_DATA_SIZE) {
 			DOCA_LOG_ERR("Received data exceeded maximum size");
 			return DOCA_ERROR_UNEXPECTED;
 		}
 		memcpy(buf_ptr, chunk, chunk_len);
-		buf_ptr += chunk_len;
+		buf_ptr = (void *)(buf_ptr + chunk_len);
 	}
+	DOCA_LOG_DBG("cc_chunk_data_recv finished");
+#ifdef DEBUG_TIMER_ENABLED
+        GET_TIME(tend);
+		PRINT_TIME("cc_chunk_data_recv(body)", tstart, tend);
+#endif
 
 	return DOCA_SUCCESS;
 }

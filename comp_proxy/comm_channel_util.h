@@ -5,20 +5,17 @@
 #include <doca_error.h>
 #include <stdbool.h>
 
-#define MAX_USER_TXT_SIZE 4000					/* Maximum size of user input text */
-#define MAX_TXT_SIZE (MAX_USER_TXT_SIZE + 1)			/* Maximum size of input text */
 #define USER_PCI_ADDR_LEN 7					/* User PCI address string length */
 #define PCI_ADDR_LEN (USER_PCI_ADDR_LEN + 1)			/* PCI address string length */
 
-#define MAX_DATA_SIZE (1 * 1024 * 1024) /* Comm Channel Max data size 1MBytes */
+#define MAX_DATA_SIZE (512 * 1024 * 1024 + 128) /* Comm Channel Max data size 512MBytes */
 #define MAX_MSG_SIZE 4000		    
-#define CC_MAX_MSG_SIZE 100         /* Comm Channel maximum message size */
-#define CC_MAX_QUEUE_SIZE 10		/* Maximum amount of message in queue */
+#define CC_MAX_MSG_SIZE 4016         /* Comm Channel maximum message size */
+#define CC_MAX_QUEUE_SIZE 100		/* Maximum amount of message in queue */
 
 
 struct mpi_dpuo_config {
 	char cc_dev_pci_addr[PCI_ADDR_LEN];		/* Comm Channel DOCA device PCI address */
-	char text[MAX_TXT_SIZE];				/* DEBUG: Text to send to Comm Channel server */
 	bool is_sender;                         /* DEBUG: sender/receiver */
 };
 

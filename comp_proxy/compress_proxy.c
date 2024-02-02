@@ -31,7 +31,6 @@
 #include <bits/getopt_core.h>
 #include <signal.h>
 #include <stdbool.h>
-#include <time.h>
 
 
 // UCX Communication
@@ -43,15 +42,6 @@
 #define PRINT_INTERVAL         2000
 #define TEST_AM_ID             0
 
-// #define DEBUG_TIMER_ENABLED    true
-
-#define GET_TIME(_timespec_val) {\
-    clock_gettime(CLOCK_MONOTONIC, &(_timespec_val));\
-}
-#define PRINT_TIME(_ts, _te) {\
-    double _f = ((double)(_te).tv_sec*1e9 + (_te).tv_nsec) - ((double)(_ts).tv_sec*1e9 + (_ts).tv_nsec);\
-    printf("time %f us\n", _f/1000);\
-}
 
 DOCA_LOG_REGISTER(COMPRESS_PROXY);
 
@@ -197,11 +187,6 @@ static inline int request_finalize(ucp_worker_h ucp_worker, test_req_t *request,
     int ret = 0;
     ucs_status_t status;
 
-#ifdef DEBUG_TIMER_ENABLED
-    struct timespec tstart, tend;
-    GET_TIME(tstart);
-#endif
-
     if (request == NULL) {
         status = UCS_OK;
         goto check_request_status;
@@ -226,12 +211,6 @@ check_request_status:
         return -1;
     }
 
-#ifdef DEBUG_TIMER_ENABLED
-    GET_TIME(tend);
-    printf("request_finalize: ");
-    PRINT_TIME(tstart, tend);
-#endif
-    // print_result(is_receiver, iov);
     return ret;
 }
 
@@ -495,7 +474,11 @@ static int proxy_progress(ucp_worker_h ucp_worker,
     doca_error_t result;
     int ret = 0;
 
-    // Receive buffer for data from Comm Channel
+#ifdef DEBUG_TIMER_ENABLED
+        struct timespec ts, te;
+        printf("===============proxy_progress==============\n");
+#endif
+    /* ********** Receive message from HOST start ********** */
     struct mpi_dpuo_message_v2 *msg_from_host; // This ptr is initialized in cc_chunk_data_recv
     size_t msg_from_host_len = sizeof(struct mpi_dpuo_message_v2);
 
@@ -507,13 +490,15 @@ static int proxy_progress(ucp_worker_h ucp_worker,
         return result;
     }
     DOCA_LOG_DBG("Received message from host through CC type: %s", mpi_dpuo_message_type_string(msg_from_host->type));
-    DOCA_LOG_DBG("Received message from host through CC buffer_len: '%zd'", msg_from_host->buffer_len);
+    DOCA_LOG_DBG("Received message from host through CC buffer_len: '%zu'", msg_from_host->buffer_len);
+    DOCA_LOG_INFO("DATA/%s/%s", mpi_dpuo_message_type_string(msg_from_host->type), cpxy_sendrecv_type_string(send_recv_type));
+    /* ********** Receive message from HOST end ********** */
 
     /* UCP_Send/Recv */
-    DOCA_LOG_INFO("DATA/%s/%s", mpi_dpuo_message_type_string(msg_from_host->type), cpxy_sendrecv_type_string(send_recv_type));
     if (msg_from_host->type == MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST) {
         /* This process is sender */
 
+        /* ********** Compression start ********** */
         void *compressed_data; // This ptr is initialized in compress_deflate
         size_t compressed_data_len;
         struct compress_param comp_param;
@@ -527,17 +512,28 @@ static int proxy_progress(ucp_worker_h ucp_worker,
             ret = -1;
             goto free_ucp_send_msg;
         }
-        DOCA_LOG_INFO("Compression finished!");
 
-        DOCA_LOG_INFO("UCP_Send start");
+
+        // void *compressed_data;
+        // size_t compressed_data_len;
+        // result = (int)compress_zstd(msg_from_host->buffer, msg_from_host->buffer_len, &compressed_data, &compressed_data_len);
+        // if (result != 0) {
+        //     DOCA_LOG_ERR("Compress failed: zstd");
+        //     ret = -1;
+        //     goto free_ucp_send_msg;
+        // }
+        DOCA_LOG_INFO("Compression finished!");
+        /* ********** Compression end ********** */
+
 
 #ifdef DEBUG_TIMER_ENABLED
-        struct timespec ts, te;
         GET_TIME(ts);
 #endif
+        DOCA_LOG_INFO("UCP_Send start");
         struct cpxy_compress_message cpxy_msg;
         cpxy_msg.header.data_len = compressed_data_len;
         cpxy_msg.header.is_compressed = true;
+        cpxy_msg.header.plain_data_len = msg_from_host->buffer_len; // Needed to decompress
         cpxy_msg.data = compressed_data;
         
         ucp_dt_iov_t iov[2]; /* Message header and body */
@@ -551,8 +547,7 @@ static int proxy_progress(ucp_worker_h ucp_worker,
         }
 #ifdef DEBUG_TIMER_ENABLED
         GET_TIME(te);
-        printf("UCP_Send: ");
-        PRINT_TIME(ts, te);
+        PRINT_TIME("send_recv(send)", ts, te);
 #endif
 free_ucp_send_msg:
         free(compressed_data);
@@ -561,7 +556,10 @@ free_ucp_send_msg:
 
         DOCA_LOG_INFO("UCP_Recv start. Waiting for data from another DPU");
 
-        void *data = (void *)calloc(MAX_DATA_SIZE, sizeof(char));
+#ifdef DEBUG_TIMER_ENABLED
+        GET_TIME(ts);
+#endif
+        void *data = (void *)malloc(MAX_DATA_SIZE);
         struct cpxy_compress_message cpxy_msg;
         cpxy_msg.data = data;
         ucp_dt_iov_t iov[2]; /* Message header and body */
@@ -569,17 +567,30 @@ free_ucp_send_msg:
         iov[0].length = sizeof(cpxy_msg.header);
         iov[1].buffer = cpxy_msg.data;
         iov[1].length = MAX_DATA_SIZE;
+#ifdef DEBUG_TIMER_ENABLED
+        GET_TIME(te);
+        PRINT_TIME("malloc for UCP_Recv data", ts, te);
+#endif
 
+
+#ifdef DEBUG_TIMER_ENABLED
+        GET_TIME(ts);
+#endif
         ret = send_recv(ucp_worker, ucp_ep, true, iov, 2, send_recv_type);
         if (ret != 0) goto free_ucp_recv_msg;
         DOCA_LOG_INFO("UCP_Recv finished. cpxy_msg.header.data_len=%zu", cpxy_msg.header.data_len);
+#ifdef DEBUG_TIMER_ENABLED
+        GET_TIME(te);
+        PRINT_TIME("send_recv(recv)", ts, te);
+#endif
 
+        /* ********** Decompression start ********** */
         struct compress_param decomp_param;
         decomp_param.mode = COMPRESS_MODE_DECOMPRESS_DEFLATE;
         strncpy(decomp_param.pci_address, cfg.cc_dev_pci_addr, PCI_ADDR_LEN);
 
         void *plain_data;  // This ptr is initialized in decompress_deflate.
-        size_t plain_data_len;
+        size_t plain_data_len = cpxy_msg.header.plain_data_len; // Header
         result = decompress_deflate(
             cpxy_msg.data, cpxy_msg.header.data_len,
             (void **)&plain_data, &plain_data_len, &decomp_param);
@@ -590,14 +601,24 @@ free_ucp_send_msg:
         }
         DOCA_LOG_INFO("Decomp finished! plain_data_len=%zu", plain_data_len);
 
+        // void *plain_data;
+        // size_t plain_data_len;
+        // result = (int)decompress_zstd(cpxy_msg.data, cpxy_msg.header.data_len, &plain_data, &plain_data_len);
+        // if (result != 0) {
+        //     DOCA_LOG_ERR("Failed to decompress data: zstd");
+        //     ret = -1;
+        //     goto free_ucp_recv_msg;
+        // }
+        /* ********** Decompression end ********** */
+
 
         struct mpi_dpuo_message_v2 *msg;
-        msg = calloc(1 , sizeof(struct mpi_dpuo_message_v2));
+        msg = malloc(sizeof(struct mpi_dpuo_message_v2));
         msg->type = MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE;
         msg->buffer_len = plain_data_len;
         memcpy(msg->buffer, plain_data, plain_data_len);
+        // DOCA_LOG_DBG("CC_Send to host start data↓\n%s", hex_dump(msg, MPI_DPUO_MESSAGE_V2_HDR_LEN+msg->buffer_len));
 
-        DOCA_LOG_DBG("CC_Send to host start data↓\n%s", hex_dump(msg, MPI_DPUO_MESSAGE_V2_HDR_LEN+msg->buffer_len));
 
         result = cc_chunk_data_send(cc_objects->cc_ep, &cc_objects->cc_peer_addr, msg, msg->buffer_len+MPI_DPUO_MESSAGE_V2_HDR_LEN);
         if (result != DOCA_SUCCESS) {
@@ -605,10 +626,18 @@ free_ucp_send_msg:
             ret = -1;
             goto free_cc_recv_msg;
         }
+#ifdef DEBUG_TIMER_ENABLED
+        GET_TIME(ts);
+#endif
 free_cc_recv_msg:
         free(msg);
 free_ucp_recv_msg:
         free(data);
+        free(plain_data);
+#ifdef DEBUG_TIMER_ENABLED
+        GET_TIME(te);
+        PRINT_TIME("free msg and data", ts, te);
+#endif
         DOCA_LOG_INFO("CC_Send to host finished");
     } else {
         DOCA_LOG_ERR("Unknown mpi_dpuo_message_type_t %d", msg_from_host->type);
@@ -741,11 +770,6 @@ static int run_client(ucp_worker_h ucp_worker, char *server_addr, send_recv_type
         goto err_ep;
     }
 
-    // Receive buffer for data from Comm Channel
-    struct mpi_dpuo_message msg_from_host;
-    size_t msg_from_host_len = sizeof(struct mpi_dpuo_message);
-    memset(&msg_from_host, 0, msg_from_host_len);
-
     while(!quit_app) {
         /* main loop */
         ret = proxy_progress(ucp_worker, client_ep, send_recv_type, cc_objects);
@@ -855,11 +879,20 @@ init_comm_channel_server(
 	}
 
     // TODO: max message size is 65535 (uint16)
-	result = doca_comm_channel_ep_set_max_msg_size(cc_objects->cc_ep, sizeof(struct mpi_dpuo_message));
+	result = doca_comm_channel_ep_set_max_msg_size(cc_objects->cc_ep, CC_MAX_MSG_SIZE);
 	if (result != DOCA_SUCCESS) {
 		DOCA_LOG_ERR("Failed to set max_msg_size property");
 		goto destroy_cc;
 	}
+
+    uint16_t max_msg_size = 0;
+    result = doca_comm_channel_ep_get_max_msg_size(cc_objects->cc_ep, &max_msg_size);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("Failed to get max_msg_size property");
+		goto destroy_cc;
+	}
+    DOCA_LOG_INFO("COMM_CHANNEL max msg size: %"PRIu16"", max_msg_size);
+
 
 	result = doca_comm_channel_ep_set_send_queue_size(cc_objects->cc_ep, CC_MAX_QUEUE_SIZE);
 	if (result != DOCA_SUCCESS) {

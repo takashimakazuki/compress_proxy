@@ -3,6 +3,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <zstd.h>
+#include <time.h>
+
+#define GET_TIME(_timespec_val) {\
+    clock_gettime(CLOCK_MONOTONIC_COARSE, &(_timespec_val));\
+}
+#define PRINT_TIME(_name, _ts, _te) {\
+    double _f = ((double)(_te).tv_sec*1e9 + (_te).tv_nsec) - ((double)(_ts).tv_sec*1e9 + (_ts).tv_nsec);\
+    printf("%30s: %15.7fus %10.4fms\n", #_name, _f/1000, _f/1000/1000);\
+}
 
 #define CHECK(cond, ...)                        \
     do {                                        \
@@ -36,11 +45,18 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
     src_total_len = (size_t)dtype_len * count;
 
 
+    // struct timespec ts, te;
+    // GET_TIME(ts);
+
     size_t  c_buff_size = ZSTD_compressBound(src_total_len);
     void* c_buff = malloc(c_buff_size);
 
 
     size_t c_size = ZSTD_compress(c_buff, c_buff_size, buf, src_total_len, 1);
+
+
+    // GET_TIME(te);
+    // PRINT_TIME("comp", ts, te);
 
     return PMPI_Send(c_buff, c_size, MPI_CHAR, dest, tag, comm);
 }
@@ -65,6 +81,8 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
         return result;
     }
 
+    // struct timespec ts, te;
+    // GET_TIME(ts);
     unsigned long long decompressed_size = ZSTD_getFrameContentSize(recv_buf, recv_buf_len);
     CHECK(decompressed_size != ZSTD_CONTENTSIZE_ERROR, "compress_mpi_recv: not compressed by zstd!");
     CHECK(decompressed_size != ZSTD_CONTENTSIZE_UNKNOWN, "compress_mpi_recv: original size unknown!");
@@ -77,6 +95,8 @@ int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, M
 
     free(recv_buf);
 
+    // GET_TIME(te);
+    // PRINT_TIME("decomp", ts, te);
 
-    return (int)compressed_size;
+    return MPI_SUCCESS;
 }
