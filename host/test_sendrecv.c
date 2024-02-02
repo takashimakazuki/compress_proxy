@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 int main(int argc, char **argv)
 {
@@ -20,16 +21,15 @@ int main(int argc, char **argv)
     }
 
 
-    int len = 1*1024*1024; // 1MB
-    char src_buf[len+1];
-    char dst_buf[len+1];
-    
-    memset(src_buf, 'A', len);
-    src_buf[len] = '\0';
-
     double t_start, t_end;
+    int result;
 
-    for(int iter=0; iter<1; iter++) {
+    // 1KB->64MB
+    for(int len=1024; len<64*1024*1024; len*=32) { 
+        char *src_buf = (char *)calloc(1, len);
+        char *dst_buf = (char *)calloc(1, len);
+        memset(src_buf, 'A', len);
+
         if (rank == 0) {
             t_start = MPI_Wtime();
             
@@ -43,11 +43,9 @@ int main(int argc, char **argv)
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0) {
-            printf("==========Barrier==========\n");
-            printf("Iter%d finished\n", iter);
+            // printf("==========Barrier==========\n");
             double latency = (t_end - t_start) * 1e6;
-            printf("ping-pong latency/ latency: %f us / %f us\n", latency, latency/2);
-            printf("ping-pong latency/ latency: %f ms / %f ms\n", latency/1000, latency/1000/2);
+            printf("%10d  %f\n", len, latency/2);
         }
     }
 

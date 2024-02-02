@@ -22,6 +22,7 @@ struct mpi_dpuo_config cfg;
 
 
 bool quit_app;		/* Shared variable to allow for a proper shutdown */
+FILE *log_file;
 
 void signal_handler(int signum)
 {
@@ -133,6 +134,11 @@ doca_error_t start_comm_channel_sendrecv(void *buffer, size_t data_len, bool is_
 		struct mpi_dpuo_message_v2 *msg;
 
 		/* Fill cc message that is sent to DPU */
+#ifdef DEBUG_TIMER_ENABLED
+		struct timespec ts, te;
+		GET_TIME(ts); // "Allocate Compress resource: ": time 2090.812000 us
+#endif
+
 		msg = (struct mpi_dpuo_message_v2 *)calloc(1, sizeof(struct mpi_dpuo_message_v2));
 		msg->type = MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST;
 		msg->buffer_len = data_len;
@@ -146,8 +152,19 @@ doca_error_t start_comm_channel_sendrecv(void *buffer, size_t data_len, bool is_
 			DOCA_LOG_ERR("Failed to send data chunks through CC");
 			return result;
 		}
+		#ifdef DEBUG_TIMER_ENABLED
+			GET_TIME(te);
+			PRINT_TIME("Sender: cc_chunk_data_send", ts, te);
+		#endif
+
 	} else {
 		/* Receiver */
+		#ifdef DEBUG_TIMER_ENABLED
+			struct timespec ts, te;
+			GET_TIME(ts); 
+		#endif
+
+
 		struct mpi_dpuo_message_v2 *msg;
 		struct mpi_dpuo_message_v2 *recv_msg;
 		size_t recv_msg_len = MPI_DPUO_MESSAGE_V2_HDR_LEN + data_len;
@@ -167,6 +184,15 @@ doca_error_t start_comm_channel_sendrecv(void *buffer, size_t data_len, bool is_
 		}
 		DOCA_LOG_INFO("Receiver: CC_Send finished");
 		
+		#ifdef DEBUG_TIMER_ENABLED
+			GET_TIME(te);
+			PRINT_TIME("Receiver: cc_chunk_data_send", ts, te);
+		#endif
+
+		
+#ifdef DEBUG_TIMER_ENABLED
+		GET_TIME(ts);
+#endif
 		DOCA_LOG_INFO("Receiver: CC_Recv waiting for data from DPU");
 		/* Waiting for message from DPU daemon(compress_proxy)*/
 		result = cc_chunk_data_recv(cc_objects->cc_ep, &cc_objects->cc_peer_addr, (void **)(&recv_msg), &recv_msg_len);
@@ -176,12 +202,16 @@ doca_error_t start_comm_channel_sendrecv(void *buffer, size_t data_len, bool is_
 
 		DOCA_LOG_INFO("Receiver: Message received from DPU");
 		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(recv_msg->type));
-		DOCA_LOG_INFO("-buffer: %s", recv_msg->buffer);
+		// DOCA_LOG_INFO("-buffer: %s", recv_msg->buffer);
 		DOCA_LOG_INFO("-buffer_len: %zd", recv_msg->buffer_len);
 		DOCA_LOG_INFO("-total length: %ld", recv_msg_len);
 		if (recv_msg->type == MPI_DPUO_MESSAGE_TYPE_DATA_RESPONSE) {
 			memcpy(buffer, recv_msg->buffer, recv_msg->buffer_len);
 		}
+#ifdef DEBUG_TIMER_ENABLED
+		GET_TIME(te);
+		PRINT_TIME("Receiver: cc_chunk_data_recv", ts, te);
+#endif
 	}
   return result;
 }
@@ -200,8 +230,6 @@ int MPI_Init(int *argc, char ***argv)
     static int ret = 0;
     const char *server_name = "compress_proxy_cc";
     doca_error_t result;
-	struct doca_log_backend *log_backend;
-
 
 	ret = PMPI_Init(argc, argv);
 
@@ -218,7 +246,11 @@ int MPI_Init(int *argc, char ***argv)
     print_cpxy_config(&cfg);
 
     /* Create a logger backend that prints to the standard output */
-    // result = doca_log_backend_create_standard();
+	// struct doca_log_backend *log_backend;
+	// char filename[40] = "";
+	// sprintf(filename, "dpu_log_%s", hostname);
+	// log_file = fopen(filename, "w");
+	// result = doca_log_backend_create_with_file(log_file, &log_backend);
     // if (result != DOCA_SUCCESS) {
     //   DOCA_LOG_ERR("Failed to create doca_log backend");
     //   return -1;
@@ -248,6 +280,7 @@ int MPI_Finalize() {
 		return result;
 	}
 
+	// fclose(log_file);
 	ret = PMPI_Finalize();
 	return ret;
 }
