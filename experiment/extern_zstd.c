@@ -38,6 +38,9 @@
 
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
+    struct timespec ts, te;
+    GET_TIME(ts);
+
     int dtype_len;
     size_t src_total_len; 
   
@@ -45,20 +48,16 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
     src_total_len = (size_t)dtype_len * count;
 
 
-    // struct timespec ts, te;
-    // GET_TIME(ts);
-
     size_t  c_buff_size = ZSTD_compressBound(src_total_len);
-    void* c_buff = malloc(c_buff_size);
+    void* c_buff = calloc(1, c_buff_size);
 
 
     size_t c_size = ZSTD_compress(c_buff, c_buff_size, buf, src_total_len, 1);
 
-
-    // GET_TIME(te);
-    // PRINT_TIME("comp", ts, te);
-
-    return PMPI_Send(c_buff, c_size, MPI_CHAR, dest, tag, comm);
+    int ret = PMPI_Send(c_buff, c_size, MPI_CHAR, dest, tag, comm);
+    GET_TIME(te);
+    PRINT_TIME("Zstd comp", ts, te);
+    return ret;
 }
 
 int MPI_Recv(void *buf, int count, MPI_Datatype datatype, int source, int tag, MPI_Comm comm, MPI_Status *status)

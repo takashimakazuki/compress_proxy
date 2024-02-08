@@ -70,7 +70,7 @@ struct cpxy_compress_objects {
 
 struct cpxy_compress_message {
     struct header_ {
-        bool    is_compressed;
+        bool      is_compressed;
         size_t    data_len;
         size_t    plain_data_len;
     } header;

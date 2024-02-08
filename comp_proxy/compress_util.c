@@ -71,22 +71,29 @@ compress_deflate(
 		goto destroy_resources;
 	}
 
+#ifdef DEBUG_TIMER_ENABLED
+	struct timespec ts, te;
+	GET_TIME(ts);
+#endif
 	/* Start compress context */
 	result = doca_ctx_start(state->ctx);
 	if (result != DOCA_SUCCESS) {
 		DOCA_LOG_ERR("Failed to start context: %s", doca_error_get_descr(result));
 		goto destroy_resources;
 	}
-
-	*compressed_data = calloc(1, plain_data_len);
+#ifdef DEBUG_TIMER_ENABLED
+	GET_TIME(te);
+	PRINT_TIME("doca_ctx_start", ts, te);
+#endif
+	*compressed_data = malloc(plain_data_len);
 	if (*compressed_data == NULL) {
 		result = DOCA_ERROR_NO_MEMORY;
 		DOCA_LOG_ERR("Failed to allocate memory: %s", doca_error_get_descr(result));
 		goto destroy_resources;
 	}
 
+
 #ifdef DEBUG_TIMER_ENABLED
-	struct timespec ts, te;
     GET_TIME(ts);
 #endif
 	result = doca_mmap_set_memrange(state->dst_mmap, *compressed_data, plain_data_len);
@@ -112,8 +119,8 @@ compress_deflate(
 		goto free_dst_buf;
 	}
 #ifdef DEBUG_TIMER_ENABLED
-        GET_TIME(te);
-		PRINT_TIME("comp:memrange", ts, te);
+	GET_TIME(te);
+	PRINT_TIME("comp:memrange", ts, te);
 #endif
 
 
@@ -209,7 +216,7 @@ submit_compress_deflate_task(struct compress_resources *resources, struct doca_b
 	struct compress_result task_result = {0};
 	struct timespec ts = {
 		.tv_sec = 0,
-		.tv_nsec = 1000 * 1000 * 10,
+		.tv_nsec = 1000 * 10,
 	};
 	doca_error_t result;
 
@@ -320,7 +327,7 @@ decompress_deflate(
 	struct timespec ts, te;
 	GET_TIME(ts);
 #endif
-	*plain_data = calloc(1, *plain_data_len);
+	*plain_data = malloc(*plain_data_len);
 	if (*plain_data == NULL) {
 		result = DOCA_ERROR_NO_MEMORY;
 		DOCA_LOG_ERR("Destination buffer (for plain data) is not initialized correctly");
@@ -840,7 +847,7 @@ int compress_zstd(
 	GET_TIME(ts);
 #endif
     size_t c_buff_size = ZSTD_compressBound(plain_data_len);
-    *compressed_data = calloc(1, c_buff_size);
+    *compressed_data = malloc(c_buff_size);
 
     size_t c_size = ZSTD_compress(*compressed_data, c_buff_size, plain_data, plain_data_len, 1);
 	*compressed_data_len = c_size;
@@ -865,7 +872,7 @@ int decompress_zstd(
     CHECK(decompressed_size != ZSTD_CONTENTSIZE_ERROR, "compress_mpi_recv: not compressed by zstd!");
     CHECK(decompressed_size != ZSTD_CONTENTSIZE_UNKNOWN, "compress_mpi_recv: original size unknown!");
 
-	*plain_data = calloc(1, decompressed_size);
+	*plain_data = malloc(decompressed_size);
 
     size_t compressed_size = ZSTD_findFrameCompressedSize(compressed_data, compressed_data_len);
 

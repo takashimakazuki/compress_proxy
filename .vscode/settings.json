@@ -67,7 +67,12 @@
         "system_error": "c",
         "typeinfo": "c",
         "utility": "c",
-        "fcntl.h": "c"
+        "fcntl.h": "c",
+        "stddef.h": "c",
+        "compress_util.h": "c",
+        "doca_compress.h": "c",
+        "zlib.h": "c",
+        "stat.h": "c"
     },
     "C_Cpp.default.includePath": [
         // "/opt/mellanox/dpdk/include/dpdk",

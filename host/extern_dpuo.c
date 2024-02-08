@@ -133,20 +133,26 @@ doca_error_t start_comm_channel_sendrecv(void *buffer, size_t data_len, bool is_
 		/* Sender */
 		struct mpi_dpuo_message_v2 *msg;
 
+		struct timespec ts, te;
 		/* Fill cc message that is sent to DPU */
 #ifdef DEBUG_TIMER_ENABLED
-		struct timespec ts, te;
+		// struct timespec ts, te;
 		GET_TIME(ts); // "Allocate Compress resource: ": time 2090.812000 us
 #endif
 
-		msg = (struct mpi_dpuo_message_v2 *)calloc(1, sizeof(struct mpi_dpuo_message_v2));
+		GET_TIME(ts);
+
+		msg = (struct mpi_dpuo_message_v2 *)malloc(sizeof(struct mpi_dpuo_message_v2));
 		msg->type = MPI_DPUO_MESSAGE_TYPE_SEND_REQUEST;
 		msg->buffer_len = data_len;
 		memcpy(msg->buffer, buffer, data_len);
 		DOCA_LOG_INFO("Sender: Message sent to DPU");
 		DOCA_LOG_INFO("-type: %s", mpi_dpuo_message_type_string(msg->type));
 		DOCA_LOG_INFO("-buffer_len %zd", msg->buffer_len);
+		GET_TIME(te);
+		PRINT_TIME("DPUO create msg", ts, te);
 
+		GET_TIME(ts);
 		result = cc_chunk_data_send(cc_objects->cc_ep, &cc_objects->cc_peer_addr, msg, msg->buffer_len+MPI_DPUO_MESSAGE_V2_HDR_LEN);
 		if (result != DOCA_SUCCESS) {
 			DOCA_LOG_ERR("Failed to send data chunks through CC");
@@ -156,6 +162,8 @@ doca_error_t start_comm_channel_sendrecv(void *buffer, size_t data_len, bool is_
 			GET_TIME(te);
 			PRINT_TIME("Sender: cc_chunk_data_send", ts, te);
 		#endif
+		GET_TIME(te);
+		PRINT_TIME("DPUO cc_send", ts, te);
 
 	} else {
 		/* Receiver */
@@ -288,6 +296,8 @@ int MPI_Finalize() {
 int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int tag, MPI_Comm comm)
 {
   // Send data buffer to compress_proxy(dpu daemon) and wait for completion
+	struct timespec ts, te;
+	GET_TIME(ts);
   doca_error_t result;
   int total_len, dtype_len;
   
@@ -295,6 +305,9 @@ int MPI_Send(const void *buf, int count, MPI_Datatype datatype, int dest, int ta
   total_len = dtype_len * count;
 
   result = start_comm_channel_sendrecv((void *)buf, total_len, true, &cfg, &cc_objects);
+
+	GET_TIME(te);
+	PRINT_TIME("DPUO send cputime", ts, te);
   return result;
 }
 

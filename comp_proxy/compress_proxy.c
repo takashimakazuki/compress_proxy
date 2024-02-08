@@ -499,29 +499,29 @@ static int proxy_progress(ucp_worker_h ucp_worker,
         /* This process is sender */
 
         /* ********** Compression start ********** */
-        void *compressed_data; // This ptr is initialized in compress_deflate
-        size_t compressed_data_len;
-        struct compress_param comp_param;
-        comp_param.mode = COMPRESS_MODE_COMPRESS_DEFLATE;
-        strncpy(comp_param.pci_address, cfg.cc_dev_pci_addr, PCI_ADDR_LEN);
-        result = compress_deflate(
-            msg_from_host->buffer, msg_from_host->buffer_len,
-            &compressed_data, &compressed_data_len, &comp_param);
-        if (result != DOCA_SUCCESS) {
-            DOCA_LOG_ERR("Compress failed: %s", doca_error_get_descr(result));
-            ret = -1;
-            goto free_ucp_send_msg;
-        }
-
-
-        // void *compressed_data;
+        // void *compressed_data; // This ptr is initialized in compress_deflate
         // size_t compressed_data_len;
-        // result = (int)compress_zstd(msg_from_host->buffer, msg_from_host->buffer_len, &compressed_data, &compressed_data_len);
-        // if (result != 0) {
-        //     DOCA_LOG_ERR("Compress failed: zstd");
+        // struct compress_param comp_param;
+        // comp_param.mode = COMPRESS_MODE_COMPRESS_DEFLATE;
+        // strncpy(comp_param.pci_address, cfg.cc_dev_pci_addr, PCI_ADDR_LEN);
+        // result = compress_deflate(
+        //     msg_from_host->buffer, msg_from_host->buffer_len,
+        //     &compressed_data, &compressed_data_len, &comp_param);
+        // if (result != DOCA_SUCCESS) {
+        //     DOCA_LOG_ERR("Compress failed: %s", doca_error_get_descr(result));
         //     ret = -1;
         //     goto free_ucp_send_msg;
         // }
+
+
+        void *compressed_data;
+        size_t compressed_data_len;
+        result = (int)compress_zstd(msg_from_host->buffer, msg_from_host->buffer_len, &compressed_data, &compressed_data_len);
+        if (result != 0) {
+            DOCA_LOG_ERR("Compress failed: zstd");
+            ret = -1;
+            goto free_ucp_send_msg;
+        }
         DOCA_LOG_INFO("Compression finished!");
         /* ********** Compression end ********** */
 
@@ -585,30 +585,30 @@ free_ucp_send_msg:
 #endif
 
         /* ********** Decompression start ********** */
-        struct compress_param decomp_param;
-        decomp_param.mode = COMPRESS_MODE_DECOMPRESS_DEFLATE;
-        strncpy(decomp_param.pci_address, cfg.cc_dev_pci_addr, PCI_ADDR_LEN);
+        // struct compress_param decomp_param;
+        // decomp_param.mode = COMPRESS_MODE_DECOMPRESS_DEFLATE;
+        // strncpy(decomp_param.pci_address, cfg.cc_dev_pci_addr, PCI_ADDR_LEN);
 
-        void *plain_data;  // This ptr is initialized in decompress_deflate.
-        size_t plain_data_len = cpxy_msg.header.plain_data_len; // Header
-        result = decompress_deflate(
-            cpxy_msg.data, cpxy_msg.header.data_len,
-            (void **)&plain_data, &plain_data_len, &decomp_param);
-        if (result != DOCA_SUCCESS) {
-            DOCA_LOG_ERR("Failed to decompress data: %s", doca_error_get_descr(result));
-            ret = -1;
-            goto free_ucp_recv_msg;
-        }
-        DOCA_LOG_INFO("Decomp finished! plain_data_len=%zu", plain_data_len);
-
-        // void *plain_data;
-        // size_t plain_data_len;
-        // result = (int)decompress_zstd(cpxy_msg.data, cpxy_msg.header.data_len, &plain_data, &plain_data_len);
-        // if (result != 0) {
-        //     DOCA_LOG_ERR("Failed to decompress data: zstd");
+        // void *plain_data;  // This ptr is initialized in decompress_deflate.
+        // size_t plain_data_len = cpxy_msg.header.plain_data_len; // Header
+        // result = decompress_deflate(
+        //     cpxy_msg.data, cpxy_msg.header.data_len,
+        //     (void **)&plain_data, &plain_data_len, &decomp_param);
+        // if (result != DOCA_SUCCESS) {
+        //     DOCA_LOG_ERR("Failed to decompress data: %s", doca_error_get_descr(result));
         //     ret = -1;
         //     goto free_ucp_recv_msg;
         // }
+        // DOCA_LOG_INFO("Decomp finished! plain_data_len=%zu", plain_data_len);
+
+        void *plain_data;
+        size_t plain_data_len;
+        result = (int)decompress_zstd(cpxy_msg.data, cpxy_msg.header.data_len, &plain_data, &plain_data_len);
+        if (result != 0) {
+            DOCA_LOG_ERR("Failed to decompress data: zstd");
+            ret = -1;
+            goto free_ucp_recv_msg;
+        }
         /* ********** Decompression end ********** */
 
 

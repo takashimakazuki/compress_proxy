@@ -19,8 +19,7 @@ int main(int argc, char *argv[])
     int fd;
     struct stat sb;
 
-    // file = fopen("novel-corona-virus-2019-dataset.csv", "r");
-    file = fopen("QVAPORf01.bin", "r");
+    file = fopen("novel-corona-virus-2019-dataset.csv", "r");
     
     if (file < 0) {
         printf("Error failed to open file\n");
@@ -35,6 +34,7 @@ int main(int argc, char *argv[])
         printf("Error failed to read file\n");
         return 1;
     }
+    fclose(file);
 
 
     if (rank == 0)
@@ -52,7 +52,43 @@ int main(int argc, char *argv[])
     MPI_Barrier(MPI_COMM_WORLD);
     if (rank == 0) {
         double latency = (t_end - t_start) * 1e6;
-        printf("%dB  %f\n", size, latency/2);
+        printf("COVID19 %dB  %f us, %f ms\n", size, latency/2, latency/2/1000);
+
+    }
+
+    /* ===================================================== */
+
+    file = fopen("QVAPORf01.bin", "r");
+    if (file < 0) {
+        printf("Error failed to open file\n");
+        return 1;
+    }
+    fd = fileno(file);
+    fstat(fd, &sb);
+
+    buf = malloc(sb.st_size);
+    size = fread(buf, 1, sb.st_size, file);
+    if (size < 0) {
+        printf("Error failed to read file\n");
+        return 1;
+    }
+
+    if (rank == 0)
+    {
+        t_start = MPI_Wtime();
+        MPI_Send(buf, size, MPI_CHAR, 1, 0, MPI_COMM_WORLD);
+        MPI_Recv(buf, size, MPI_CHAR, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        t_end = MPI_Wtime();
+    }
+    else if (rank == 1)
+    {
+        MPI_Recv(buf, size, MPI_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Send(buf, size, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        double latency = (t_end - t_start) * 1e6;
+        printf("QVAPOR %dB  %f us, %f ms\n", size, latency/2, latency/2/1000);
     }
 
     fclose(file);
