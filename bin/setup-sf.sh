@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# ##### SF（Scalable Function）作成用のスクリプト #####
+# SF（BlueField-2 DPUのOSで提供される仮想ネットワークインタフェース機能，VFをさらに拡張拡張したもの）
+# Create→Setup→Deployの3手順で設定する
+
 set -x ## Display commands
 #set -e
 
@@ -8,6 +12,7 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
+# create sf
 sf_out=$(/opt/mellanox/iproute2/sbin/mlxdevm port add pci/0000:03:00.$pfnum flavour pcisf pfnum $pfnum sfnum 10)
 dev_port_index=$(echo $sf_out | grep -o "pci/0000:03:00.[0-1]/[0-9]\{6\}")
 

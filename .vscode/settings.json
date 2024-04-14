@@ -77,7 +77,7 @@
     "C_Cpp.default.includePath": [
         // "/opt/mellanox/dpdk/include/dpdk",
         "/opt/mellanox/doca/include",
-        "/home/k-takashima/ompi/build/include",
+        "/home/k-takashima/ompi/build/include", // NOTE: OpenMPIのヘッダファイルの場所．自身の環境に合わせる
         // "/opt/mellanox/dpdk/include/aarch64-linux-gnu/dpdk",
         "${workspaceFolder}/comp_proxy/include",
         // "${workspaceFolder}/comm_channel_opt_arm/mellanox/dpdk/include"

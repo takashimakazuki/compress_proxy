@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# NOTE: This file is Deprecated
+
 set -x ## Display commands
 set -e ## Enable error check
 
